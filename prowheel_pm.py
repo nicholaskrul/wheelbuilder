@@ -44,7 +44,7 @@ for key in ['f_l', 'f_r', 'r_l', 'r_r']:
     if key not in st.session_state: st.session_state[key] = 0.0
 
 # --- 4. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v7.7: Full Drivetrain Suite")
+st.title("🚲 ProWheel Lab v7.7: Custom Build Suite")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
@@ -217,3 +217,4 @@ with tabs[4]:
         if st.button("Download Spec Sheet"):
             out = f"PROWHEEL LAB SPEC\nCustomer: {target}\nRim: {data.get('rim','N/A')}\nF-Hub: {data.get('f_hub','N/A')}\nR-Hub: {data.get('r_hub','N/A')}\nFreehub Body: {data.get('freehub','N/A')}\nFRONT: L {data['f_l']} / R {data['f_r']}\nREAR: L {data['r_l']} / R {data['r_r']}"
             st.download_button("Download", out, f"{target}_Specs.txt")
+
