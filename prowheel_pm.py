@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v7.5", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 # cite: 6
@@ -220,3 +220,4 @@ with tabs[4]:
         if st.button("Download Spec Card"):
             out = f"PROWHEEL LAB - {target}\nComponents:\n- Rim: {data.get('rim','N/A')}\n- Hub: {data.get('hub','N/A')}\n- Spoke: {data.get('spoke','N/A')}\n- Nipple: {data.get('nipple','N/A')}\n\nFRONT: L {data['f_l']} / R {data['f_r']}\nREAR: L {data['r_l']} / R {data['r_r']}"
             st.download_button("Download", out, f"{target}_Specs.txt")
+
