@@ -49,7 +49,7 @@ def calculate_side(erd, fd, os, holes, crosses, is_sp, sp_offset):
 st.set_page_config(page_title="ProWheel Lab v5.1", layout="wide", page_icon="🚲")
 init_db()
 
-st.title("🚲 ProWheel Lab v5.1: Asymmetrical Workshop")
+st.title("🚲 ProWheel Lab v5.1: Wheelbuilder Workshop")
 
 tabs = st.tabs(["📊 Dashboard", "➕ New Build", "🧮 Spoke Calc", "📦 Library"])
 
@@ -147,4 +147,5 @@ with tabs[1]:
     st.header("Register New Build")
     # ... Logic to fetch from DB and save build ...
     st.info("Ensure you enter the Left and Right lengths generated in the Calculator tab.")
+
 
