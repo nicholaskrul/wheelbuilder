@@ -51,7 +51,7 @@ init_db()
 
 st.title("🚲 ProWheel Lab v5.1: Asymmetrical Workshop")
 
-tabs = st.tabs(["📊 Dashboard", "➕ New Build", "🧮 Asymmetrical Calc", "📦 Library"])
+tabs = st.tabs(["📊 Dashboard", "➕ New Build", "🧮 Spoke Calc", "📦 Library"])
 
 # --- TAB 1: DASHBOARD ---
 with tabs[0]:
@@ -147,3 +147,4 @@ with tabs[1]:
     st.header("Register New Build")
     # ... Logic to fetch from DB and save build ...
     st.info("Ensure you enter the Left and Right lengths generated in the Calculator tab.")
+
