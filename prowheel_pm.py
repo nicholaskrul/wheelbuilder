@@ -73,7 +73,7 @@ with st.sidebar:
             st.rerun()
 
 # --- MAIN DASHBOARD ---
-st.title("🚲 Wheelbuilding Pipeline")
+st.title("🚲 Wheelbuilding Project Manager")
 df = load_builds()
 
 if not df.empty:
@@ -115,4 +115,5 @@ if not df.empty:
     st.dataframe(df.sort_values(by="id", ascending=False), use_container_width=True, hide_index=True)
 
 else:
+
     st.info("No builds in the system yet.")
