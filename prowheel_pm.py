@@ -47,7 +47,7 @@ for key in ['f_l', 'f_r', 'r_l', 'r_r']:
 st.title("🚲 Wheelbuilder Lab: Wheel Build Portfolio Suite")
 st.markdown("---")
 
-tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
+tabs = st.tabs(["📊 Dashboard", "🧮 Precision Spoke Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
 
 # --- TAB: DASHBOARD ---
 with tabs[0]:
@@ -64,7 +64,7 @@ with tabs[0]:
     except Exception as e:
         st.error(f"Connect to 'builds' tab failed: {e}")
 
-# --- TAB: PRECISION CALC ---
+# --- TAB: SPOKE CALC ---
 with tabs[1]:
     st.header("🧮 Integrated Calculator & Weight Estimator")
     try:
@@ -220,5 +220,6 @@ with tabs[4]:
         if st.button("Download Spec Card"):
             out = f"PROWHEEL LAB - {target}\nComponents:\n- Rim: {data.get('rim','N/A')}\n- Hub: {data.get('hub','N/A')}\n- Spoke: {data.get('spoke','N/A')}\n- Nipple: {data.get('nipple','N/A')}\n\nFRONT: L {data['f_l']} / R {data['f_r']}\nREAR: L {data['r_l']} / R {data['r_r']}"
             st.download_button("Download", out, f"{target}_Specs.txt")
+
 
 
