@@ -30,7 +30,7 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset):
     return round(length, 1)
 
 # --- UI LAYOUT ---
-st.title("🚲 ProWheel Lab: Permanent Cloud DB")
+st.title("🚲 ProWheel Lab Portal")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Component Library", "➕ Register Build"])
@@ -153,3 +153,4 @@ with tabs[3]:
                 st.success("Project logged successfully!")
     except:
         st.warning("Populate your Rims and Hubs sheets first!")
+
