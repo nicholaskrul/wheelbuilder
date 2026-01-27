@@ -45,7 +45,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v10.4: Stability & Library Fix")
+st.title("🚲 WheelBuilder Lab v10.4")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -219,3 +219,4 @@ with tabs[4]:
         st.divider()
         if d['f_l'] > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         if d['r_l'] > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
+
