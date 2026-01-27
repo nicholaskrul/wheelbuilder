@@ -5,13 +5,13 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v8.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v8.4", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Caching (10 mins) to manage Google API Quota
+    # Intelligent caching to manage Google API Quota
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -41,14 +41,14 @@ def trigger_edit(customer_name):
     st.session_state.edit_customer = customer_name
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v8.3: Precision Restoration")
+st.title("🚲 ProWheel Lab v8.4: Workflow Optimized")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
 
 # --- TAB: DASHBOARD ---
 with tabs[0]:
-    st.subheader("🏁 Live Build Pipeline")
+    st.subheader("🏁 Workshop Pipeline")
     if st.button("🔄 Force Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -58,13 +58,16 @@ with tabs[0]:
         if not df_b.empty:
             for index, row in df_b.iterrows():
                 col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-                status_color = "🟢" if row.get('status') == "Finished" else "🟡"
-                col1.write(f"{status_color} **{row['customer']}**")
+                # Visual status markers
+                status_icon = "✅" if row.get('status') == "Complete" else "🛠️"
+                col1.write(f"{status_icon} **{row['customer']}**")
                 col2.write(f"📅 {row['date']}")
-                col3.write(f"🛠️ {row.get('status', 'In Progress')}")
-                if col4.button("Edit Build", key=f"edit_btn_{index}"):
+                col3.write(f"**Status:** {row.get('status', 'Order received')}")
+                if col4.button("Edit", key=f"edit_btn_{index}"):
                     trigger_edit(row['customer'])
                     st.rerun()
+        else:
+            st.info("No active builds found.")
     except Exception as e:
         st.error(f"Dashboard sync error: {e}")
 
@@ -89,30 +92,29 @@ with tabs[1]:
             l_fd, r_fd, l_os, r_os, l_sp, r_sp = 40.8, 36.0, 28.0, 40.2, 1.7, 1.8
 
         st.divider()
-        # --- RESTORED INPUTS ---
         i1, i2, i3 = st.columns(3)
-        holes = i1.number_input("Spoke Count (Holes)", value=holes_init, step=2)
-        l_cross = i2.selectbox("Left Cross Pattern", [0, 1, 2, 3, 4], index=3)
-        r_cross = i3.selectbox("Right Cross Pattern", [0, 1, 2, 3, 4], index=3)
+        holes = i1.number_input("Spoke Count", value=holes_init, step=2)
+        l_cross = i2.selectbox("L-Cross", [0, 1, 2, 3, 4], index=3)
+        r_cross = i3.selectbox("R-Cross", [0, 1, 2, 3, 4], index=3)
         
         r_col1, r_col2 = st.columns(2)
-        is_sp = r_col1.toggle("Straightpull Hub Geometry?", value=True)
-        r_mode = r_col2.selectbox("Rounding", ["None", "Nearest Even", "Nearest Odd"])
+        is_sp = r_col1.toggle("Straightpull Hub?", value=True)
+        r_mode = r_col2.selectbox("Rounding Mode", ["None", "Nearest Even", "Nearest Odd"])
         
         res_l = calculate_precision_spoke(erd, l_fd, l_os, holes, l_cross, is_sp, l_sp, 2.4, r_mode)
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
         m_col1, m_col2 = st.columns(2)
-        m_col1.metric("L Spoke Length", f"{res_l} mm")
-        m_col2.metric("R Spoke Length", f"{res_r} mm")
+        m_col1.metric("L Spoke", f"{res_l} mm")
+        m_col2.metric("R Spoke", f"{res_r} mm")
         
-        target_wheel = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
-        if st.button("Apply to Build"):
-            if target_wheel == "Front": 
+        side = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
+        if st.button("Apply to Build Form"):
+            if side == "Front": 
                 st.session_state.f_l, st.session_state.f_r = res_l, res_r
             else: 
                 st.session_state.r_l, st.session_state.r_r = res_l, res_r
-            st.success(f"{target_wheel} staged!")
+            st.success(f"{side} staged!")
     except Exception as e: st.error(f"Calculator Error: {e}")
 
 # --- TAB: COMPONENT LIBRARY ---
@@ -142,27 +144,31 @@ with tabs[3]:
     try:
         df_builds, df_rims, df_hubs = get_worksheet_data("builds"), get_worksheet_data("rims"), get_worksheet_data("hubs")
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
+        
         mode = "Update Existing" if st.session_state.edit_customer else "New Build"
-        with st.form("build_form_v83"):
+        with st.form("build_form_v84"):
             if mode == "New Build":
                 cust = st.text_input("Customer Name")
             else:
                 cust_list = list(df_builds['customer'])
                 def_idx = cust_list.index(st.session_state.edit_customer) if st.session_state.edit_customer in cust_list else 0
                 cust = st.selectbox("Project", cust_list, index=def_idx)
-            stat = st.selectbox("Status", ["Waiting for Parts", "In Progress", "Laced", "Finished"])
+            
+            # --- UPDATED WORKFLOW OPTIONS ---
+            stat = st.selectbox("Build Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
+            
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
             f_h, r_h = st.selectbox("Front Hub", df_hubs['brand'] + " " + df_hubs['model']), st.selectbox("Rear Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sp, ni = st.selectbox("Spoke", df_spokes['brand'] + " " + df_spokes['model']), st.selectbox("Nipple", df_nipples['brand'] + " " + df_nipples['model'])
             sc1, sc2, sc3, sc4 = st.columns(4)
             vfl, vfr, vrl, vrr = sc1.number_input("F-L", value=st.session_state.f_l), sc2.number_input("F-R", value=st.session_state.f_r), sc3.number_input("R-L", value=st.session_state.r_l), sc4.number_input("R-R", value=st.session_state.r_r)
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
-            if st.form_submit_button("Save"):
+            if st.form_submit_button("Sync Build Data"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":f_h, "r_hub":r_h, "rim":rim, "spoke":sp, "nipple":ni, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
                 if mode == "Update Existing": df_builds = df_builds[df_builds['customer'] != cust]
                 conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
-                st.success("Synced!")
+                st.success("Synced to Sheet!")
                 st.rerun()
     except Exception as e: st.warning(f"Error: {e}")
 
@@ -174,6 +180,7 @@ with tabs[4]:
         target = st.selectbox("Select Project", df_builds['customer'])
         d = df_builds[df_builds['customer'] == target].iloc[0]
         st.markdown(f"### Build for: **{target}**")
-        st.write(f"**Front Wheel:** L {d['f_l']} / R {d['f_r']} mm")
-        st.write(f"**Rear Wheel:** L {d['r_l']} / R {d['r_r']} mm")
-        if d.get('invoice_url'): st.markdown(f"🔗 [Invoice]({d['invoice_url']})")
+        st.write(f"**Current Status:** {d.get('status', 'Order received')}")
+        st.info(f"**Front Wheel:** L {d['f_l']} / R {d['f_r']} mm")
+        st.success(f"**Rear Wheel:** L {d['r_l']} / R {d['r_r']} mm")
+        if d.get('invoice_url'): st.markdown(f"🔗 [View Invoice]({d['invoice_url']})")
