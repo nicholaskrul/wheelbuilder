@@ -11,7 +11,6 @@ st.set_page_config(page_title="ProWheel Lab v10.4", layout="wide", page_icon="�
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Intelligent caching (10 mins) to manage API Quota
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -19,12 +18,10 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
-        # Standard J-Bend Geometry
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
-        # Straightpull Logic
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -45,7 +42,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 WheelBuilder Lab v10.4")
+st.title("🚲 ProWheel Lab v10.4: Production Edition")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -137,7 +134,6 @@ with tabs[3]:
     try:
         df_rims, df_hubs = get_worksheet_data("rims"), get_worksheet_data("hubs")
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
-        
         hub_options = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_options = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
         
@@ -216,7 +212,16 @@ with tabs[4]:
         if d.get('nipple', 'None') != 'None': wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
         
         wc3.metric("Total Weight", f"{round(total_w, 1)} g")
-        st.divider()
-        if d['f_l'] > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
-        if d['r_l'] > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
-
+        
+        # --- BUILDERS CARD VIEW ---
+        st.markdown("---")
+        st.subheader("🛠️ Builders Card (Workshop View)")
+        card1, card2 = st.columns(2)
+        with card1:
+            st.markdown(f"**Project:** {target}")
+            st.write(f"**Rims:** {d['f_rim']} / {d['r_rim']}")
+            st.write(f"**Spokes/Nips:** {d['spoke']} / {d['nipple']}")
+        with card2:
+            st.write(f"**Total Count:** {int(qty)} spokes")
+            if d['f_l'] > 0: st.info(f"**FRONT:** L {d['f_l']} / R {d['f_r']}")
+            if d['r_l'] > 0: st.success(f"**REAR:** L {d['r_l']} / R {d['r_r']}")
