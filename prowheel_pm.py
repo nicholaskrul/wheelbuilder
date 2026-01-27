@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v9.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v9.5", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -43,7 +43,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v9.4: Stability Overhaul")
+st.title("🚲 ProWheel Lab v9.5: Stability Recovery Build")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -93,27 +93,27 @@ with tabs[1]:
         i1, i2, i3 = st.columns(3)
         holes = i1.number_input("Spoke Count", value=holes_init, step=2)
         l_cross, r_cross = i2.selectbox("L-Cross", [0,1,2,3,4], index=3), i3.selectbox("R-Cross", [0,1,2,3,4], index=3)
-        is_sp, r_mode = st.toggle("Straightpull Hub Geometry?", value=True), st.selectbox("Rounding", ["None", "Nearest Even", "Nearest Odd"])
+        is_sp, r_mode = st.toggle("Straightpull?", value=True), st.selectbox("Rounding", ["None", "Nearest Even", "Nearest Odd"])
         
         res_l = calculate_precision_spoke(erd, l_fd, l_os, holes, l_cross, is_sp, l_sp, 2.4, r_mode)
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
-        mc1, mc2 = st.columns(2)
-        mc1.metric("L Spoke Length", f"{res_l} mm")
-        mc2.metric("R Spoke Length", f"{res_r} mm")
+        m_col1, m_col2 = st.columns(2)
+        m_col1.metric("L Spoke Length", f"{res_l} mm")
+        m_col2.metric("R Spoke Length", f"{res_r} mm")
         
-        target = st.radio("Stage to Wheel:", ["Front", "Rear"], horizontal=True)
+        side = st.radio("Stage to Wheel:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply and Stage"):
-            if target == "Front": st.session_state.f_l, st.session_state.f_r = res_l, res_r
+            if side == "Front": st.session_state.f_l, st.session_state.f_r = res_l, res_r
             else: st.session_state.r_l, st.session_state.r_r = res_l, res_r
-            st.success(f"{target} staged!")
+            st.success(f"{side} staged!")
     except Exception as e: st.error(f"Calculator Error: {e}")
 
 # --- TAB: COMPONENT LIBRARY ---
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v94", clear_on_submit=True):
+    with st.form("lib_form_v95", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -140,7 +140,7 @@ with tabs[3]:
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
         mode = "Update Existing" if st.session_state.edit_customer else "New Build"
         
-        with st.form("build_form_v94"):
+        with st.form("build_form_v95"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
@@ -153,7 +153,10 @@ with tabs[3]:
             
             if st.form_submit_button("💾 Save Build"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":fh, "r_hub":rh, "rim":rim, "spoke":sp, "nipple":ni, "spoke_count":s_count, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
-                if mode == "Update Existing": df_builds = df_builds[df_builds['customer'] != cust]
+                if mode == "Update Existing": 
+                    df_builds = df_builds[df_builds['customer'] != cust]
+                
+                # FIXED SYNTAX: Properly closed parenthesis
                 conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
                 st.session_state.active_tab = "📊 Dashboard"
@@ -169,12 +172,13 @@ with tabs[4]:
         target = st.selectbox("Select Project", df_builds['customer'])
         d = df_builds[df_builds['customer'] == target].iloc[0]
         
-        # --- ROBUST WEIGHT RETRIEVAL ---
+        # --- ROBUST DEFENSIVE WEIGHT RETRIEVAL ---
         def get_safe_w(sheet_name, part_name):
             try:
                 df = get_worksheet_data(sheet_name)
                 match = df[(df['brand'] + " " + df['model']) == part_name]
                 if not match.empty and 'weight' in df.columns:
+                    # Force numeric conversion to handle 'nan' or text strings
                     val = pd.to_numeric(match['weight'].values[0], errors='coerce')
                     return float(val) if not pd.isna(val) else 0.0
                 return 0.0
@@ -183,9 +187,11 @@ with tabs[4]:
         w_rim, w_fh, w_rh = get_safe_w("rims", d['rim']), get_safe_w("hubs", d['f_hub']), get_safe_w("hubs", d['r_hub'])
         w_sp, w_ni = get_safe_w("spokes", d['spoke']), get_safe_w("nipples", d['nipple'])
         
-        # Fallback for spoke count to prevent int() error
+        # DEFENSIVE SPOKE COUNT: Default to 56 if data is missing or corrupted
         try:
-            qty = float(d.get('spoke_count', 56))
+            raw_qty = d.get('spoke_count', 56)
+            qty = float(pd.to_numeric(raw_qty, errors='coerce'))
+            if pd.isna(qty): qty = 56.0
         except:
             qty = 56.0
 
@@ -200,7 +206,7 @@ with tabs[4]:
         wc2.write(f"**Spokes (x{int(qty)}):** {d['spoke']} ({w_sp}g ea)")
         wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
         
-        # Safe metric rendering
+        # Safe metric rendering to prevent DeltaGenerator error
         if not pd.isna(total_w):
             wc3.metric("Total Weight", f"{round(total_w, 1)} g")
         else:
