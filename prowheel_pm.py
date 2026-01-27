@@ -11,7 +11,7 @@ st.set_page_config(page_title="ProWheel Lab v8.8", layout="wide", page_icon="�
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Caching to manage API Quota (10 mins)
+    # Intelligent caching to manage API Quota (10 mins)
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -19,10 +19,12 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
+        # Standard J-Bend Geometry (Matches v6.4 accuracy)
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
+        # Straightpull Logic (Tangential path + K-offset)
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -36,7 +38,7 @@ for key in ['f_l', 'f_r', 'r_l', 'r_r']:
     if key not in st.session_state: st.session_state[key] = 0.0
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v8.8: Fail-Safe Recovery")
+st.title("🚲 ProWheel Lab v8.8: Fail-Safe Recovery Build")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
@@ -69,9 +71,9 @@ with tabs[1]:
         calc_mode = st.radio("Source", ["Use Library", "Manual Entry"], horizontal=True)
         
         if calc_mode == "Use Library" and not df_rims.empty and not df_hubs.empty:
-            c_l, c_r = st.columns(2)
-            rim_sel = c_l.selectbox("Select Rim", df_rims['brand'] + " " + df_rims['model'])
-            hub_sel = c_r.selectbox("Select Hub", df_hubs['brand'] + " " + df_hubs['model'])
+            cl1, cl2 = st.columns(2)
+            rim_sel = cl1.selectbox("Select Rim", df_rims['brand'] + " " + df_rims['model'])
+            hub_sel = cl2.selectbox("Select Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sel_r = df_rims[(df_rims['brand'] + " " + df_rims['model']) == rim_sel].iloc[0]
             sel_h = df_hubs[(df_hubs['brand'] + " " + df_hubs['model']) == hub_sel].iloc[0]
             erd, holes_init = sel_r['erd'], int(sel_r['holes'])
@@ -90,10 +92,10 @@ with tabs[1]:
         res_l = calculate_precision_spoke(erd, l_fd, l_os, holes, l_cross, is_sp, l_sp, 2.4, r_mode)
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
-        # --- FIXED UI RENDERING ---
-        m1, m2 = st.columns(2)
-        m1.metric("L Spoke Length", f"{res_l} mm")
-        m2.metric("R Spoke Length", f"{res_r} mm")
+        # UI RENDERING FIX
+        m_col1, m_col2 = st.columns(2)
+        m_col1.metric("L Spoke Length", f"{res_l} mm")
+        m_col2.metric("R Spoke Length", f"{res_r} mm")
         
         side = st.radio("Stage to Wheel:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply and Stage"):
@@ -133,20 +135,51 @@ with tabs[3]:
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
             fh, rh = st.selectbox("Front Hub", df_hubs['brand'] + " " + df_hubs['model']), st.selectbox("Rear Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sp, ni = st.selectbox("Spoke", df_spokes['brand'] + " " + df_spokes['model']), st.selectbox("Nipple", df_nipples['brand'] + " " + df_nipples['model'])
-            s_count = st.number_input("Spoke Count (Set)", value=56, step=4)
+            s_count = st.number_input("Spoke Count (Set Total)", value=56, step=4)
             vfl, vfr, vrl, vrr = st.number_input("F-L", value=st.session_state.f_l), st.number_input("F-R", value=st.session_state.f_r), st.number_input("R-L", value=st.session_state.r_l), st.number_input("R-R", value=st.session_state.r_r)
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
             if st.form_submit_button("Sync Build"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":fh, "r_hub":rh, "rim":rim, "spoke":sp, "nipple":ni, "spoke_count":s_count, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
-                if mode == "Update Existing": df_builds = df_builds[df_builds['customer'] != cust]
-                # --- FIXED SYNTAX HERE ---
+                if mode == "Update Existing": 
+                    df_builds = df_builds[df_builds['customer'] != cust]
+                # FIXED CONCAT LOGIC
                 conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
-                st.success("Synced!")
+                st.success("Synced successfully!")
                 st.rerun()
     except Exception as e: st.warning(f"Registration Error: {e}")
 
 # --- TAB: SPEC SHEET ---
 with tabs[4]:
     st.header("📄 Portfolio Spec Sheet")
-    df_builds = get_
+    df_builds = get_worksheet_data("builds")
+    if not df_builds.empty:
+        target = st.selectbox("Select Project", df_builds['customer'])
+        d = df_builds[df_builds['customer'] == target].iloc[0]
+        
+        # SAFE RETRIEVAL FUNCTION
+        def get_safe_w(sheet_name, part_name):
+            try:
+                df = get_worksheet_data(sheet_name)
+                if 'weight' not in df.columns: return 0.0
+                match = df[(df['brand'] + " " + df['model']) == part_name]
+                return float(match['weight'].values[0]) if not match.empty else 0.0
+            except: return 0.0
+
+        w_rim, w_fh, w_rh = get_safe_w("rims", d['rim']), get_safe_w("hubs", d['f_hub']), get_safe_w("hubs", d['r_hub'])
+        w_sp, w_ni = get_safe_w("spokes", d['spoke']), get_safe_w("nipples", d['nipple'])
+        qty = d.get('spoke_count', 56)
+        total_set_weight = (w_rim * 2) + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
+
+        st.markdown(f"### Build for: **{target}**")
+        st.divider()
+        wc1, wc2, wc3 = st.columns(3)
+        wc1.write(f"**Rim (x2):** {d['rim']} ({w_rim}g)")
+        wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
+        wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
+        wc2.write(f"**Spokes:** {d['spoke']} ({w_sp}g)")
+        wc3.write(f"**Nipples:** {d['nipple']} ({w_ni}g)")
+        wc3.metric("Total Set Weight", f"{round(total_set_weight, 1)} g")
+        st.divider()
+        st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
+        st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
