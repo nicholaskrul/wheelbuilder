@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v10.0", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v10.1", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -42,7 +42,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v10.0: Staggered & Single Wheel Suite")
+st.title("🚲 ProWheel Lab v10.1: Contextual Build Suite")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -74,21 +74,13 @@ with tabs[1]:
     st.header("🧮 Spoke Calculator")
     try:
         df_rims, df_hubs = get_worksheet_data("rims"), get_worksheet_data("hubs")
-        calc_mode = st.radio("Source", ["Use Library", "Manual Entry"], horizontal=True)
-        
-        if calc_mode == "Use Library" and not df_rims.empty and not df_hubs.empty:
-            cl1, cl2 = st.columns(2)
-            rim_sel = cl1.selectbox("Select Rim", df_rims['brand'] + " " + df_rims['model'])
-            hub_sel = cl2.selectbox("Select Hub", df_hubs['brand'] + " " + df_hubs['model'])
-            sel_r = df_rims[(df_rims['brand'] + " " + df_rims['model']) == rim_sel].iloc[0]
-            sel_h = df_hubs[(df_hubs['brand'] + " " + df_hubs['model']) == hub_sel].iloc[0]
-            erd, holes_init = sel_r['erd'], int(sel_r['holes'])
-            l_fd, r_fd, l_os, r_os, l_sp, r_sp = sel_h['fd_l'], sel_h['fd_r'], sel_h['os_l'], sel_h['os_r'], sel_h['sp_off_l'], sel_h['sp_off_r']
-        else:
-            erd, holes_init = st.number_input("ERD", 601.0), 28
-            l_fd, r_fd = st.number_input("L-PCD", 40.0), st.number_input("R-PCD", 40.0)
-            l_os, r_os = st.number_input("L-Offset", 0.0), st.number_input("R-Offset", 0.0)
-            l_sp, r_sp = st.number_input("L-SP Off", 0.0), st.number_input("R-SP Off", 0.0)
+        cl1, cl2 = st.columns(2)
+        rim_sel = cl1.selectbox("Select Rim", df_rims['brand'] + " " + df_rims['model'])
+        hub_sel = cl2.selectbox("Select Hub", df_hubs['brand'] + " " + df_hubs['model'])
+        sel_r = df_rims[(df_rims['brand'] + " " + df_rims['model']) == rim_sel].iloc[0]
+        sel_h = df_hubs[(df_hubs['brand'] + " " + df_hubs['model']) == hub_sel].iloc[0]
+        erd, holes_init = sel_r['erd'], int(sel_r['holes'])
+        l_fd, r_fd, l_os, r_os, l_sp, r_sp = sel_h['fd_l'], sel_h['fd_r'], sel_h['os_l'], sel_h['os_r'], sel_h['sp_off_l'], sel_h['sp_off_r']
 
         st.divider()
         i1, i2, i3 = st.columns(3)
@@ -114,42 +106,42 @@ with tabs[1]:
 with tabs[3]:
     st.header("📝 Register / Update Build")
     try:
-        df_builds, df_rims, df_hubs = get_worksheet_data("builds"), get_worksheet_data("rims"), get_worksheet_data("hubs")
+        df_rims, df_hubs = get_worksheet_data("rims"), get_worksheet_data("hubs")
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
         
-        # Add "None" option to all lists
         hub_options = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_options = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
-        spoke_options = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])
-        nipple_options = ["None"] + list(df_nipples['brand'] + " " + df_nipples['model'])
-
-        mode = "Update Existing" if st.session_state.edit_customer else "New Build"
         
-        with st.form("build_form_v10"):
+        with st.form("build_form_v10.1"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
-            # Split Rims and Hubs with "None" support
-            col_rim1, col_rim2 = st.columns(2)
-            f_rim = col_rim1.selectbox("Front Rim", rim_options)
-            r_rim = col_rim2.selectbox("Rear Rim", rim_options)
+            c_rim1, c_rim2 = st.columns(2)
+            f_rim = c_rim1.selectbox("Front Rim", rim_options)
+            r_rim = c_rim2.selectbox("Rear Rim", rim_options)
             
-            col_hub1, col_hub2 = st.columns(2)
-            f_hub = col_hub1.selectbox("Front Hub", hub_options)
-            r_hub = col_hub2.selectbox("Rear Hub", hub_options)
+            c_hub1, c_hub2 = st.columns(2)
+            f_hub = c_hub1.selectbox("Front Hub", hub_options)
+            r_hub = c_hub2.selectbox("Rear Hub", hub_options)
             
-            sp, ni = st.selectbox("Spoke", spoke_options), st.selectbox("Nipple", nipple_options)
+            sp, ni = st.selectbox("Spoke", ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
             
-            total_qty = st.number_input("Total Spokes (Set Total)", value=int(st.session_state.staged_holes * 2), step=2)
+            # Smart Default: If one hub is None, default to single wheel spoke count
+            default_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
+            total_qty = st.number_input("Total Spokes (Set Total)", value=default_qty, step=2)
             
+            # --- CONTEXTUAL SPOKE LENGTHS ---
             sc1, sc2, sc3, sc4 = st.columns(4)
-            vfl, vfr, vrl, vrr = sc1.number_input("F-L", value=st.session_state.f_l), sc2.number_input("F-R", value=st.session_state.f_r), sc3.number_input("R-L", value=st.session_state.r_l), sc4.number_input("R-R", value=st.session_state.r_r)
+            vfl = sc1.number_input("F-L", value=st.session_state.f_l) if f_hub != "None" else 0.0
+            vfr = sc2.number_input("F-R", value=st.session_state.f_r) if f_hub != "None" else 0.0
+            vrl = sc3.number_input("R-L", value=st.session_state.r_l) if r_hub != "None" else 0.0
+            vrr = sc4.number_input("R-R", value=st.session_state.r_r) if r_hub != "None" else 0.0
+            
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
             
             if st.form_submit_button("💾 Sync Build"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":f_hub, "r_hub":r_hub, "f_rim":f_rim, "r_rim":r_rim, "spoke":sp, "nipple":ni, "spoke_count":total_qty, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
-                if mode == "Update Existing": df_builds = df_builds[df_builds['customer'] != cust]
-                conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
+                conn.update(worksheet="builds", data=pd.concat([get_worksheet_data("builds"), pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
                 st.session_state.active_tab = "📊 Dashboard"
                 st.success("Synced!")
@@ -169,20 +161,14 @@ with tabs[4]:
             try:
                 df = get_worksheet_data(sheet_name)
                 match = df[(df['brand'] + " " + df['model']) == part_name]
-                if not match.empty:
-                    return float(pd.to_numeric(match['weight'].values[0], errors='coerce'))
-                return 0.0
+                return float(pd.to_numeric(match['weight'].values[0], errors='coerce')) if not match.empty else 0.0
             except: return 0.0
 
-        # Retrieve individual weights
-        w_f_rim = get_safe_w("rims", d.get('f_rim', 'None'))
-        w_r_rim = get_safe_w("rims", d.get('r_rim', 'None'))
+        w_f_rim, w_r_rim = get_safe_w("rims", d.get('f_rim', 'None')), get_safe_w("rims", d.get('r_rim', 'None'))
         w_fh, w_rh = get_safe_w("hubs", d.get('f_hub', 'None')), get_safe_w("hubs", d.get('r_hub', 'None'))
         w_sp, w_ni = get_safe_w("spokes", d.get('spoke', 'None')), get_safe_w("nipples", d.get('nipple', 'None'))
-        
         qty = float(pd.to_numeric(d.get('spoke_count', 0), errors='coerce'))
         
-        # New Staggered Weight Calc
         total_w = w_f_rim + w_r_rim + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
 
         st.markdown(f"### Build for: **{target}**")
@@ -197,5 +183,6 @@ with tabs[4]:
         
         wc3.metric("Total Weight", f"{round(total_w, 1)} g")
         st.divider()
+        # Only show relevant lengths
         if d['f_l'] > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         if d['r_l'] > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
