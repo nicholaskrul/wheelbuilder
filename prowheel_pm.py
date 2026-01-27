@@ -5,13 +5,13 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v10.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v10.5", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Intelligent caching (10 mins) to manage API Quota
+    # cite: 8.2, 8.7, 10.4
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -45,10 +45,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v10.4: Stability & Library Fix")
-st.markdown("---")
-
-tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
+tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "📦 Inventory", "➕ Register Build", "📄 Spec Sheet"]
 active_idx = tab_list.index(st.session_state.active_tab) if st.session_state.active_tab in tab_list else 0
 tabs = st.tabs(tab_list)
 
@@ -109,7 +106,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v10.4", clear_on_submit=True):
+    with st.form("lib_form_v10.5", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -125,14 +122,57 @@ with tabs[2]:
                 new = pd.DataFrame([{"brand":b, "model":m, "fd_l":fl, "fd_r":fr, "os_l":ol, "os_r":orr, "sp_off_l":sl, "sp_off_r":sr, "weight":w}])
                 conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs",True), new], ignore_index=True))
                 st.success("Hub saved!")
+        elif l_type == "Spokes":
+            stock = st.number_input("Starting Stock Level", 0, step=1)
+            if st.form_submit_button("Save Spoke"):
+                new = pd.DataFrame([{"brand":b, "model":m, "weight":w, "stock":stock}])
+                conn.update(worksheet="spokes", data=pd.concat([get_worksheet_data("spokes",True), new], ignore_index=True))
+                st.success("Spoke added with stock level!")
         else:
              if st.form_submit_button(f"Save {l_type}"):
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
                 conn.update(worksheet=l_type.lower(), data=pd.concat([get_worksheet_data(l_type.lower(),True), new], ignore_index=True))
                 st.success(f"{l_type} saved!")
 
-# --- TAB: REGISTER BUILD ---
+# --- TAB: INVENTORY MANAGEMENT ---
 with tabs[3]:
+    st.header("📦 Spoke Inventory Manager")
+    try:
+        df_spokes = get_worksheet_data("spokes", force_refresh=True)
+        if not df_spokes.empty:
+            # Ensure stock column exists
+            if 'stock' not in df_spokes.columns:
+                df_spokes['stock'] = 0
+            
+            st.info("Update stock levels below and click 'Sync to Sheet'.")
+            
+            # Create a form to update stock
+            with st.form("inventory_sync_form"):
+                updated_data = []
+                for idx, row in df_spokes.iterrows():
+                    cols = st.columns([3, 2, 2])
+                    cols[0].write(f"**{row['brand']} {row['model']}**")
+                    current_stock = int(pd.to_numeric(row['stock'], errors='coerce')) if not pd.isna(pd.to_numeric(row['stock'], errors='coerce')) else 0
+                    new_stock = cols[1].number_input("Stock Level", value=current_stock, key=f"stock_{idx}", step=1)
+                    cols[2].write(f"Current: {current_stock}")
+                    
+                    # Store updated row
+                    updated_row = row.to_dict()
+                    updated_row['stock'] = new_stock
+                    updated_data.append(updated_row)
+                
+                if st.form_submit_button("💾 Sync Inventory to Sheet"):
+                    new_df = pd.DataFrame(updated_data)
+                    conn.update(worksheet="spokes", data=new_df)
+                    st.success("Spoke inventory successfully updated!")
+                    st.rerun()
+        else:
+            st.warning("No spokes found in library. Add some in the 'Library' tab first.")
+    except Exception as e:
+        st.error(f"Inventory Sync Error: {e}")
+
+# --- TAB: REGISTER BUILD ---
+with tabs[4]:
     st.header("📝 Register / Update Build")
     try:
         df_rims, df_hubs = get_worksheet_data("rims"), get_worksheet_data("hubs")
@@ -141,7 +181,7 @@ with tabs[3]:
         hub_options = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_options = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
         
-        with st.form("build_form_v10.4"):
+        with st.form("build_form_v10.5"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
@@ -153,7 +193,8 @@ with tabs[3]:
             f_hub = c_hub1.selectbox("Front Hub", hub_options)
             r_hub = c_hub2.selectbox("Rear Hub", hub_options)
             
-            sp, ni = st.selectbox("Spoke", ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
+            sp_list = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])
+            sp, ni = st.selectbox("Spoke", sp_list), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
             
             default_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
             total_qty = st.number_input("Total Spokes (Set Total)", value=default_qty, step=2)
@@ -179,7 +220,7 @@ with tabs[3]:
     except Exception as e: st.warning(f"Registration Error: {e}")
 
 # --- TAB: SPEC SHEET ---
-with tabs[4]:
+with tabs[5]:
     st.header("📄 Portfolio Spec Sheet")
     df_builds = get_worksheet_data("builds")
     if not df_builds.empty:
