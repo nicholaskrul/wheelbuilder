@@ -5,13 +5,13 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v11.0", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v11.1", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Optimized caching to prevent API rate limiting
+    # Caching to manage API Quota
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -19,12 +19,10 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
-        # Standard J-Bend Geometry
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
-        # Straightpull Logic
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -109,7 +107,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v11", clear_on_submit=True):
+    with st.form("lib_form_v11_1", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -126,13 +124,12 @@ with tabs[2]:
                 conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs",True), new], ignore_index=True))
                 st.success("Hub saved!")
         elif l_type == "Spokes":
+            # Adds models to library, inventory tab handles quantities
             s_type = st.radio("Type", ["J-Bend", "Straightpull"], horizontal=True)
-            s_len = st.number_input("Length (mm)", 200, 320, 290)
-            qty = st.number_input("Initial Quantity", 0, step=1)
-            if st.form_submit_button("Save Spoke Stock"):
-                new = pd.DataFrame([{"brand":b, "model":m, "type":s_type, "length":s_len, "weight":w, "stock":qty}])
+            if st.form_submit_button("Save Spoke Model"):
+                new = pd.DataFrame([{"brand":b, "model":m, "type":s_type, "weight":w}])
                 conn.update(worksheet="spokes", data=pd.concat([get_worksheet_data("spokes",True), new], ignore_index=True))
-                st.success(f"{b} {m} ({s_len}mm) saved!")
+                st.success(f"{b} {m} model saved!")
         else:
              if st.form_submit_button(f"Save {l_type}"):
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
@@ -143,14 +140,31 @@ with tabs[2]:
 with tabs[3]:
     st.header("📦 Spoke Inventory Manager")
     try:
-        df_spokes = get_worksheet_data("spokes", force_refresh=True)
-        if not df_spokes.empty:
-            for col in ['brand', 'model', 'type', 'length', 'stock']:
-                if col not in df_spokes.columns: df_spokes[col] = 0
-            df_spokes = df_spokes.sort_values(by=['brand', 'model', 'length'])
-            with st.form("inventory_update_v11"):
+        # Pulls from dedicated inventory worksheet
+        df_inv = get_worksheet_data("spoke_inventory", force_refresh=True)
+        df_spk_lib = get_worksheet_data("spokes") # To get models
+        
+        with st.expander("➕ Add New Inventory Item"):
+            with st.form("add_inv_item"):
+                model_sel = st.selectbox("Select Model", df_spk_lib['brand'] + " " + df_spk_lib['model'])
+                i_len = st.number_input("Length (mm)", 200, 320, 290)
+                i_qty = st.number_input("Initial Quantity", 0, step=1)
+                if st.form_submit_button("Add to Inventory"):
+                    # Extract brand/model back
+                    brand = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['brand'].values[0]
+                    model = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['model'].values[0]
+                    typ = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['type'].values[0]
+                    
+                    new_item = pd.DataFrame([{"brand":brand, "model":model, "type":typ, "length":i_len, "stock":i_qty}])
+                    conn.update(worksheet="spoke_inventory", data=pd.concat([df_inv, new_item], ignore_index=True))
+                    st.success("Item added!")
+                    st.rerun()
+
+        if not df_inv.empty:
+            df_inv = df_inv.sort_values(by=['brand', 'model', 'length'])
+            with st.form("inventory_update_v11_1"):
                 updated_data = []
-                for idx, row in df_spokes.iterrows():
+                for idx, row in df_inv.iterrows():
                     cols = st.columns([2, 1, 1, 1, 1])
                     cols[0].write(f"**{row['brand']} {row['model']}**")
                     cols[1].write(f"{row['type']}")
@@ -162,12 +176,12 @@ with tabs[3]:
                     updated_row['stock'] = new_q
                     updated_data.append(updated_row)
                 if st.form_submit_button("💾 Update Stock Levels"):
-                    conn.update(worksheet="spokes", data=pd.DataFrame(updated_data))
+                    conn.update(worksheet="spoke_inventory", data=pd.DataFrame(updated_data))
                     st.success("Stock levels updated!")
                     st.rerun()
-    except Exception as e: st.error(f"Inventory sync error: {e}")
+    except Exception as e: st.info("The 'spoke_inventory' sheet is currently empty or missing headers.")
 
-# --- TAB: REGISTER BUILD (DEFENSIVE RECOVERY) ---
+# --- TAB: REGISTER BUILD ---
 with tabs[4]:
     st.header("📝 Register / Update Build")
     try:
@@ -176,9 +190,10 @@ with tabs[4]:
         
         hub_opts = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_opts = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
-        sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'] + " (" + df_spokes['length'].astype(str) + "mm " + df_spokes['type'] + ")")
+        # Simplified selection for build
+        sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])
         
-        with st.form("build_form_v11"):
+        with st.form("build_form_v11_1"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
@@ -188,9 +203,8 @@ with tabs[4]:
             c_h1, c_h2 = st.columns(2)
             f_hub, r_hub = c_h1.selectbox("Front Hub", hub_opts), c_h2.selectbox("Rear Hub", hub_opts)
             
-            sp, ni = st.selectbox("Spoke Model/Type/Length", sp_opts), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
+            sp, ni = st.selectbox("Spoke Model", sp_opts), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
             
-            # Defensive quantity handling
             def_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
             qty = st.number_input("Total Spokes Used", value=def_qty, step=2)
 
@@ -213,9 +227,9 @@ with tabs[4]:
                 st.session_state.active_tab = "📊 Dashboard"
                 st.success("Build registered!")
                 st.rerun()
-    except Exception as e: st.error(f"⚠️ Tab Rendering Error: {e}. Check for non-numeric data in your Google Sheet.")
+    except Exception as e: st.error(f"⚠️ Registration Tab Error: {e}")
 
-# --- TAB: SPEC SHEET (RECOVERY MODE) ---
+# --- TAB: SPEC SHEET ---
 with tabs[5]:
     st.header("📄 Portfolio Spec Sheet")
     try:
@@ -228,15 +242,13 @@ with tabs[5]:
                 if not part_name or part_name == "None" or str(part_name) == "nan": return 0.0
                 try:
                     df = get_worksheet_data(sheet_name)
-                    clean = str(part_name).split(' (')[0] if '(' in str(part_name) else str(part_name)
-                    match = df[(df['brand'] + " " + df['model']) == clean]
+                    match = df[(df['brand'] + " " + df['model']) == str(part_name)]
                     if not match.empty:
                         val = pd.to_numeric(match['weight'].values[0], errors='coerce')
                         return float(val) if not pd.isna(val) else 0.0
                     return 0.0
                 except: return 0.0
 
-            # --- LEGACY SCHEMA FALLBACK ---
             raw_f_rim = d.get('f_rim', d.get('rim', 'None'))
             raw_r_rim = d.get('r_rim', d.get('rim', 'None'))
             
@@ -244,7 +256,6 @@ with tabs[5]:
             w_fh, w_rh = get_safe_w("hubs", d.get('f_hub', 'None')), get_safe_w("hubs", d.get('r_hub', 'None'))
             w_sp, w_ni = get_safe_w("spokes", d.get('spoke', 'None')), get_safe_w("nipples", d.get('nipple', 'None'))
             
-            # ROBUST DEFENSIVE CALCULATION
             qty_val = pd.to_numeric(d.get('spoke_count', 0), errors='coerce')
             qty = float(qty_val) if not pd.isna(qty_val) else 0.0
             
