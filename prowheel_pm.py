@@ -38,10 +38,10 @@ for key in ['f_l', 'f_r', 'r_l', 'r_r']:
     if key not in st.session_state: st.session_state[key] = 0.0
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v8.8: Fail-Safe Recovery Build")
+st.title("🚲 WheelBuilder Lab v8.8")
 st.markdown("---")
 
-tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
+tabs = st.tabs(["📊 Dashboard", "🧮 Precision Spoke Calc", "📦 Component Library", "➕ Register Build", "📄 Spec Sheet"])
 
 # --- TAB: DASHBOARD ---
 with tabs[0]:
@@ -183,3 +183,4 @@ with tabs[4]:
         st.divider()
         st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
+
