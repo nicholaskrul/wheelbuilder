@@ -5,13 +5,12 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v9.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v9.2", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Intelligent caching to manage API Quota (10 mins)
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -41,7 +40,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v9.1: Precision Recovery Build")
+st.title("🚲 ProWheel Lab v9.2: Variable Precision Suite")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -97,8 +96,8 @@ with tabs[1]:
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
         m_col1, m_col2 = st.columns(2)
-        m_col1.metric("L Length", f"{res_l} mm")
-        m_col2.metric("R Length", f"{res_r} mm")
+        m_col1.metric("L Spoke Length", f"{res_l} mm")
+        m_col2.metric("R Spoke Length", f"{res_r} mm")
         
         side = st.radio("Stage to Wheel:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply to Build"):
@@ -111,10 +110,9 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v91", clear_on_submit=True):
+    with st.form("lib_form_v92", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
-        
         if l_type == "Rims":
             e, h = st.number_input("ERD", 601.0), st.number_input("Holes", 28)
             if st.form_submit_button("Save Rim"):
@@ -139,13 +137,16 @@ with tabs[3]:
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
         mode = "Update Existing" if st.session_state.edit_customer else "New Build"
         
-        with st.form("build_form_v91"):
+        with st.form("build_form_v92"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
             fh, rh = st.selectbox("Front Hub", df_hubs['brand'] + " " + df_hubs['model']), st.selectbox("Rear Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sp, ni = st.selectbox("Spoke", df_spokes['brand'] + " " + df_spokes['model']), st.selectbox("Nipple", df_nipples['brand'] + " " + df_nipples['model'])
-            s_count = st.number_input("Spoke Count (Total Set)", 56, step=4)
+            
+            # --- CRITICAL: VARIABLE SPOKE COUNT ---
+            s_count = st.number_input("Total Spokes (Set Total)", 56, step=2)
+            
             sc1, sc2, sc3, sc4 = st.columns(4)
             vfl, vfr, vrl, vrr = sc1.number_input("F-L", value=st.session_state.f_l), sc2.number_input("F-R", value=st.session_state.f_r), sc3.number_input("R-L", value=st.session_state.r_l), sc4.number_input("R-R", value=st.session_state.r_r)
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
@@ -168,18 +169,25 @@ with tabs[4]:
         target = st.selectbox("Select Project", df_builds['customer'])
         d = df_builds[df_builds['customer'] == target].iloc[0]
         
+        # --- SAFE WEIGHT RETRIEVAL: RESILIENT TO MISSING DATA & NaN ---
         def get_safe_w(sheet_name, part_name):
             try:
                 df = get_worksheet_data(sheet_name)
                 match = df[(df['brand'] + " " + df['model']) == part_name]
                 if not match.empty and 'weight' in df.columns:
-                    return float(pd.to_numeric(match['weight'].values[0], errors='coerce'))
+                    val = match['weight'].values[0]
+                    return float(pd.to_numeric(val, errors='coerce')) if not pd.isna(pd.to_numeric(val, errors='coerce')) else 0.0
                 return 0.0
             except: return 0.0
 
-        w_rim, w_fh, w_rh = get_safe_w("rims", d['rim']), get_safe_w("hubs", d['f_hub']), get_safe_w("hubs", d['r_hub'])
-        w_sp, w_ni = get_safe_w("spokes", d['spoke']), get_safe_w("nipples", d['nipple'])
-        qty = d.get('spoke_count', 56)
+        w_rim = get_safe_w("rims", d['rim'])
+        w_fh = get_safe_w("hubs", d['f_hub'])
+        w_rh = get_safe_w("hubs", d['r_hub'])
+        w_sp = get_safe_w("spokes", d['spoke'])
+        w_ni = get_safe_w("nipples", d['nipple'])
+        
+        # --- CRITICAL: VARIABLE CALCULATION ---
+        qty = float(d.get('spoke_count', 56))
         total_w = (w_rim * 2) + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
 
         st.markdown(f"### Build for: **{target}**")
@@ -188,9 +196,15 @@ with tabs[4]:
         wc1.write(f"**Rim (x2):** {d['rim']} ({w_rim}g ea)")
         wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
         wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
-        wc2.write(f"**Spokes (x{qty}):** {d['spoke']} ({w_sp}g ea)")
-        wc3.write(f"**Nipples (x{qty}):** {d['nipple']} ({w_ni}g ea)")
-        wc3.metric("Total Weight", f"{round(total_w, 1)} g")
+        wc2.write(f"**Spokes (x{int(qty)}):** {d['spoke']} ({w_sp}g ea)")
+        wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
+        
+        # Render Metric with safe check
+        if not math.isnan(total_w):
+            wc3.metric("Total Weight", f"{round(total_w, 1)} g")
+        else:
+            wc3.metric("Total Weight", "Data Missing")
+            
         st.divider()
         st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
