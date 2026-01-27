@@ -5,24 +5,27 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v11.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v11.2", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# Optimized Data Fetcher to respect 300/min quota
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Caching to manage API Quota
-    return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
+    # Cache increased to 15 mins (900s) to stop 429 Quota Exceeded errors
+    return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 900)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
 def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hole_diam=2.4, round_mode="None"):
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
+        # Standard J-Bend Geometry
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
+        # Straightpull Logic
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -54,7 +57,7 @@ tabs = st.tabs(tab_list)
 with tabs[0]:
     st.subheader("🏁 Workshop Pipeline")
     if st.button("🔄 Refresh Pipeline"):
-        st.cache_data.clear()
+        st.cache_data.clear() # Clears 15-min cache to pull fresh data
         st.rerun()
     try:
         df_b = get_worksheet_data("builds")
@@ -107,42 +110,45 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v11_1", clear_on_submit=True):
+    with st.form("lib_form_v11_2", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
             e, h = st.number_input("ERD", 601.0), st.number_input("Holes", 28)
             if st.form_submit_button("Save Rim"):
                 new = pd.DataFrame([{"brand":b, "model":m, "erd":e, "holes":h, "weight":w}])
-                conn.update(worksheet="rims", data=pd.concat([get_worksheet_data("rims",True), new], ignore_index=True))
+                conn.update(worksheet="rims", data=pd.concat([get_worksheet_data("rims"), new], ignore_index=True))
+                st.cache_data.clear() # Force update after write
                 st.success("Rim saved!")
         elif l_type == "Hubs":
             fl, fr, ol, orr = st.number_input("L-PCD", 40.0), st.number_input("R-PCD", 40.0), st.number_input("L-OS", 30.0), st.number_input("R-OS", 30.0)
             sl, sr = st.number_input("L-SP Off", 0.0), st.number_input("R-SP Off", 0.0)
             if st.form_submit_button("Save Hub"):
                 new = pd.DataFrame([{"brand":b, "model":m, "fd_l":fl, "fd_r":fr, "os_l":ol, "os_r":orr, "sp_off_l":sl, "sp_off_r":sr, "weight":w}])
-                conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs",True), new], ignore_index=True))
+                conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs"), new], ignore_index=True))
+                st.cache_data.clear()
                 st.success("Hub saved!")
         elif l_type == "Spokes":
-            # Adds models to library, inventory tab handles quantities
             s_type = st.radio("Type", ["J-Bend", "Straightpull"], horizontal=True)
             if st.form_submit_button("Save Spoke Model"):
                 new = pd.DataFrame([{"brand":b, "model":m, "type":s_type, "weight":w}])
-                conn.update(worksheet="spokes", data=pd.concat([get_worksheet_data("spokes",True), new], ignore_index=True))
+                conn.update(worksheet="spokes", data=pd.concat([get_worksheet_data("spokes"), new], ignore_index=True))
+                st.cache_data.clear()
                 st.success(f"{b} {m} model saved!")
         else:
              if st.form_submit_button(f"Save {l_type}"):
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
-                conn.update(worksheet=l_type.lower(), data=pd.concat([get_worksheet_data(l_type.lower(),True), new], ignore_index=True))
+                conn.update(worksheet=l_type.lower(), data=pd.concat([get_worksheet_data(l_type.lower()), new], ignore_index=True))
+                st.cache_data.clear()
                 st.success(f"{l_type} saved!")
 
 # --- TAB: INVENTORY MANAGEMENT ---
 with tabs[3]:
     st.header("📦 Spoke Inventory Manager")
     try:
-        # Pulls from dedicated inventory worksheet
-        df_inv = get_worksheet_data("spoke_inventory", force_refresh=True)
-        df_spk_lib = get_worksheet_data("spokes") # To get models
+        # Isolated pull for inventory worksheet
+        df_inv = get_worksheet_data("spoke_inventory")
+        df_spk_lib = get_worksheet_data("spokes") 
         
         with st.expander("➕ Add New Inventory Item"):
             with st.form("add_inv_item"):
@@ -150,36 +156,34 @@ with tabs[3]:
                 i_len = st.number_input("Length (mm)", 200, 320, 290)
                 i_qty = st.number_input("Initial Quantity", 0, step=1)
                 if st.form_submit_button("Add to Inventory"):
-                    # Extract brand/model back
-                    brand = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['brand'].values[0]
-                    model = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['model'].values[0]
-                    typ = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]['type'].values[0]
-                    
-                    new_item = pd.DataFrame([{"brand":brand, "model":model, "type":typ, "length":i_len, "stock":i_qty}])
+                    brand_match = df_spk_lib[df_spk_lib['brand'] + " " + df_spk_lib['model'] == model_sel]
+                    new_item = pd.DataFrame([{"brand":brand_match['brand'].values[0], "model":brand_match['model'].values[0], "type":brand_match['type'].values[0], "length":i_len, "stock":i_qty}])
                     conn.update(worksheet="spoke_inventory", data=pd.concat([df_inv, new_item], ignore_index=True))
+                    st.cache_data.clear()
                     st.success("Item added!")
                     st.rerun()
 
         if not df_inv.empty:
             df_inv = df_inv.sort_values(by=['brand', 'model', 'length'])
-            with st.form("inventory_update_v11_1"):
+            with st.form("inventory_update_v11_2"):
                 updated_data = []
                 for idx, row in df_inv.iterrows():
                     cols = st.columns([2, 1, 1, 1, 1])
                     cols[0].write(f"**{row['brand']} {row['model']}**")
                     cols[1].write(f"{row['type']}")
                     cols[2].write(f"{row['length']}mm")
-                    current_q = int(pd.to_numeric(row['stock'], errors='coerce')) if not pd.isna(pd.to_numeric(row['stock'], errors='coerce')) else 0
-                    new_q = cols[3].number_input("Quantity", value=current_q, key=f"inv_q_{idx}", step=1)
-                    cols[4].write(f"Current: {current_q}")
+                    curr_q = int(pd.to_numeric(row['stock'], errors='coerce')) if not pd.isna(pd.to_numeric(row['stock'], errors='coerce')) else 0
+                    new_q = cols[3].number_input("Quantity", value=curr_q, key=f"inv_q_{idx}", step=1)
+                    cols[4].write(f"Current: {curr_q}")
                     updated_row = row.to_dict()
                     updated_row['stock'] = new_q
                     updated_data.append(updated_row)
                 if st.form_submit_button("💾 Update Stock Levels"):
                     conn.update(worksheet="spoke_inventory", data=pd.DataFrame(updated_data))
+                    st.cache_data.clear()
                     st.success("Stock levels updated!")
                     st.rerun()
-    except Exception as e: st.info("The 'spoke_inventory' sheet is currently empty or missing headers.")
+    except Exception as e: st.info("Check if 'spoke_inventory' sheet has data.")
 
 # --- TAB: REGISTER BUILD ---
 with tabs[4]:
@@ -190,44 +194,36 @@ with tabs[4]:
         
         hub_opts = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_opts = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
-        # Simplified selection for build
         sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])
         
-        with st.form("build_form_v11_1"):
+        with st.form("build_form_v11_2"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
-            
             c_r1, c_r2 = st.columns(2)
             f_rim, r_rim = c_r1.selectbox("Front Rim", rim_opts), c_r2.selectbox("Rear Rim", rim_opts)
-            
             c_h1, c_h2 = st.columns(2)
             f_hub, r_hub = c_h1.selectbox("Front Hub", hub_opts), c_h2.selectbox("Rear Hub", hub_opts)
-            
             sp, ni = st.selectbox("Spoke Model", sp_opts), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
-            
             def_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
             qty = st.number_input("Total Spokes Used", value=def_qty, step=2)
-
-            st.markdown("---")
-            st.info(f"💡 **Calc Reference:** F: {st.session_state.f_l}/{st.session_state.f_r} | R: {st.session_state.r_l}/{st.session_state.r_r}")
-            
+            st.info(f"💡 **Calc Values:** F: {st.session_state.f_l}/{st.session_state.f_r} | R: {st.session_state.r_l}/{st.session_state.r_r}")
             sc1, sc2, sc3, sc4 = st.columns(4)
             vfl = sc1.number_input("F-L", value=st.session_state.f_l) if f_hub != "None" else 0.0
             vfr = sc2.number_input("F-R", value=st.session_state.f_r) if f_hub != "None" else 0.0
             vrl = sc3.number_input("R-L", value=st.session_state.r_l) if r_hub != "None" else 0.0
             vrr = sc4.number_input("R-R", value=st.session_state.r_r) if r_hub != "None" else 0.0
-            
-            inv = st.text_input("Invoice URL (Zoho/Cloud)")
+            inv = st.text_input("Invoice URL")
             notes = st.text_area("Notes")
             
             if st.form_submit_button("💾 Save Build"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":f_hub, "r_hub":r_hub, "f_rim":f_rim, "r_rim":r_rim, "spoke":sp, "nipple":ni, "spoke_count":qty, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
                 conn.update(worksheet="builds", data=pd.concat([get_worksheet_data("builds"), pd.DataFrame([entry])], ignore_index=True))
+                st.cache_data.clear()
                 st.session_state.edit_customer = None
                 st.session_state.active_tab = "📊 Dashboard"
                 st.success("Build registered!")
                 st.rerun()
-    except Exception as e: st.error(f"⚠️ Registration Tab Error: {e}")
+    except Exception as e: st.error(f"Tab Error: {e}")
 
 # --- TAB: SPEC SHEET ---
 with tabs[5]:
@@ -237,7 +233,6 @@ with tabs[5]:
         if not df_builds.empty:
             target = st.selectbox("Select Project", df_builds['customer'])
             d = df_builds[df_builds['customer'] == target].iloc[0]
-            
             def get_safe_w(sheet_name, part_name):
                 if not part_name or part_name == "None" or str(part_name) == "nan": return 0.0
                 try:
@@ -251,40 +246,29 @@ with tabs[5]:
 
             raw_f_rim = d.get('f_rim', d.get('rim', 'None'))
             raw_r_rim = d.get('r_rim', d.get('rim', 'None'))
-            
             w_fr, w_rr = get_safe_w("rims", raw_f_rim), get_safe_w("rims", raw_r_rim)
             w_fh, w_rh = get_safe_w("hubs", d.get('f_hub', 'None')), get_safe_w("hubs", d.get('r_hub', 'None'))
             w_sp, w_ni = get_safe_w("spokes", d.get('spoke', 'None')), get_safe_w("nipples", d.get('nipple', 'None'))
-            
             qty_val = pd.to_numeric(d.get('spoke_count', 0), errors='coerce')
             qty = float(qty_val) if not pd.isna(qty_val) else 0.0
-            
             total_w = w_fr + w_rr + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
 
             st.markdown(f"### Build Portfolio: **{target}**")
             st.divider()
             wc1, wc2, wc3 = st.columns(3)
-            
             if raw_f_rim == raw_r_rim and raw_f_rim != "None":
                 wc1.write(f"**Rim (x2):** {raw_f_rim} ({w_fr}g ea)")
             else:
                 if raw_f_rim != "None": wc1.write(f"**Front Rim:** {raw_f_rim} ({w_fr}g)")
                 if raw_r_rim != "None": wc1.write(f"**Rear Rim:** {raw_r_rim} ({w_rr}g)")
-
             if d.get('f_hub', 'None') != 'None': wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
             if d.get('r_hub', 'None') != 'None': wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
             if d.get('spoke', 'None') != 'None': wc2.write(f"**Spokes (x{int(qty)}):** {d['spoke']} ({w_sp}g ea)")
             if d.get('nipple', 'None') != 'None': wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
-            
-            if not pd.isna(total_w):
-                wc3.metric("Total Weight", f"{round(total_w, 1)} g")
-            else:
-                wc3.metric("Total Weight", "Data Incomplete")
-            
+            wc3.metric("Total Weight", f"{round(total_w, 1)} g")
             if d.get('invoice_url') and str(d['invoice_url']) != "nan":
                 st.link_button("📄 Download invoice", d['invoice_url'])
-            
             st.divider()
             if d.get('f_l', 0) > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
             if d.get('r_l', 0) > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
-    except Exception as e: st.error(f"Spec Sheet Rendering Error: {e}")
+    except Exception as e: st.error(f"Spec Sheet Error: {e}")
