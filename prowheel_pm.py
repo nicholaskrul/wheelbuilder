@@ -43,6 +43,9 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
+st.title("🚲 WheelBuilder Lab")
+st.markdown("---")
+
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "📦 Inventory", "➕ Register Build", "📄 Spec Sheet"]
 active_idx = tab_list.index(st.session_state.active_tab) if st.session_state.active_tab in tab_list else 0
 tabs = st.tabs(tab_list)
@@ -261,3 +264,4 @@ with tabs[5]:
         st.divider()
         if d['f_l'] > 0: st.info(f"**Front lengths:** L {d['f_l']} / R {d['f_r']} mm")
         if d['r_l'] > 0: st.success(f"**Rear lengths:** L {d['r_l']} / R {d['r_r']} mm")
+
