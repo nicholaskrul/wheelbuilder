@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v8.8", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v8.9", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -19,12 +19,10 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
-        # Standard J-Bend Geometry (Matches v6.4 accuracy)
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
-        # Straightpull Logic (Tangential path + K-offset)
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -33,15 +31,26 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     return round(length, 1)
 
 # --- 4. SESSION STATE INITIALIZATION ---
+if 'active_tab' not in st.session_state: st.session_state.active_tab = "📊 Dashboard"
 if 'edit_customer' not in st.session_state: st.session_state.edit_customer = None
+
+# Stage lengths from calculator
 for key in ['f_l', 'f_r', 'r_l', 'r_r']:
     if key not in st.session_state: st.session_state[key] = 0.0
 
+def trigger_edit(customer_name):
+    st.session_state.edit_customer = customer_name
+    st.session_state.active_tab = "➕ Register Build" # Force tab switch
+
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 WheelBuilder Lab v8.8")
+st.title("🚲 ProWheel Lab v8.9: Seamless Edit Suite")
 st.markdown("---")
 
-tabs = st.tabs(["📊 Dashboard", "🧮 Precision Spoke Calc", "📦 Component Library", "➕ Register Build", "📄 Spec Sheet"])
+# Use session state to control which tab is visible
+tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
+active_idx = tab_list.index(st.session_state.active_tab)
+
+tabs = st.tabs(tab_list)
 
 # --- TAB: DASHBOARD ---
 with tabs[0]:
@@ -59,7 +68,7 @@ with tabs[0]:
                 col2.write(f"📅 {row['date']}")
                 col3.write(f"**Status:** {row.get('status', 'Order received')}")
                 if col4.button("Edit", key=f"edit_btn_{index}"):
-                    st.session_state.edit_customer = row['customer']
+                    trigger_edit(row['customer'])
                     st.rerun()
     except Exception as e: st.error(f"Dashboard sync error: {e}")
 
@@ -92,10 +101,9 @@ with tabs[1]:
         res_l = calculate_precision_spoke(erd, l_fd, l_os, holes, l_cross, is_sp, l_sp, 2.4, r_mode)
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
-        # UI RENDERING FIX
-        m_col1, m_col2 = st.columns(2)
-        m_col1.metric("L Spoke Length", f"{res_l} mm")
-        m_col2.metric("R Spoke Length", f"{res_r} mm")
+        mc1, mc2 = st.columns(2)
+        mc1.metric("L Spoke", f"{res_l} mm")
+        mc2.metric("R Spoke", f"{res_r} mm")
         
         side = st.radio("Stage to Wheel:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply and Stage"):
@@ -108,12 +116,12 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v88", clear_on_submit=True):
+    with st.form("lib_form_v89", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", step=0.1)
         if st.form_submit_button("Save Component"):
             if l_type == "Rims":
-                new = pd.DataFrame([{"brand":b, "model":m, "erd":st.number_input("ERD"), "holes":st.number_input("Holes"), "weight":w}])
+                new = pd.DataFrame([{"brand":b, "model":m, "erd":0.0, "holes":0, "weight":w}])
                 conn.update(worksheet="rims", data=pd.concat([get_worksheet_data("rims",True), new], ignore_index=True))
             elif l_type == "Hubs":
                 new = pd.DataFrame([{"brand":b, "model":m, "fd_l":0.0, "fd_r":0.0, "os_l":0.0, "os_r":0.0, "sp_off_l":0.0, "sp_off_r":0.0, "weight":w}])
@@ -122,65 +130,53 @@ with tabs[2]:
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
                 conn.update(worksheet=l_type.lower(), data=pd.concat([get_worksheet_data(l_type.lower(),True), new], ignore_index=True))
 
-# --- TAB: REGISTER BUILD ---
+# --- TAB: REGISTER BUILD (NOW FULLY EDITABLE) ---
 with tabs[3]:
     st.header("📝 Register / Update Build")
     try:
         df_builds, df_rims, df_hubs = get_worksheet_data("builds"), get_worksheet_data("rims"), get_worksheet_data("hubs")
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
+        
         mode = "Update Existing" if st.session_state.edit_customer else "New Build"
-        with st.form("build_form_v88"):
-            cust = st.text_input("Customer", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
+        
+        with st.form("build_form_v89"):
+            if mode == "New Build":
+                cust = st.text_input("Customer Name")
+            else:
+                cust_list = list(df_builds['customer'])
+                def_idx = cust_list.index(st.session_state.edit_customer) if st.session_state.edit_customer in cust_list else 0
+                cust = st.selectbox("Editing Project:", cust_list, index=def_idx)
+            
+            # Form fields
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
             fh, rh = st.selectbox("Front Hub", df_hubs['brand'] + " " + df_hubs['model']), st.selectbox("Rear Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sp, ni = st.selectbox("Spoke", df_spokes['brand'] + " " + df_spokes['model']), st.selectbox("Nipple", df_nipples['brand'] + " " + df_nipples['model'])
-            s_count = st.number_input("Spoke Count (Set Total)", value=56, step=4)
-            vfl, vfr, vrl, vrr = st.number_input("F-L", value=st.session_state.f_l), st.number_input("F-R", value=st.session_state.f_r), st.number_input("R-L", value=st.session_state.r_l), st.number_input("R-R", value=st.session_state.r_r)
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            vfl, vfr = sc1.number_input("F-L", value=st.session_state.f_l), sc2.number_input("F-R", value=st.session_state.f_r)
+            vrl, vrr = sc3.number_input("R-L", value=st.session_state.r_l), sc4.number_input("R-R", value=st.session_state.r_r)
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
-            if st.form_submit_button("Sync Build"):
-                entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":fh, "r_hub":rh, "rim":rim, "spoke":sp, "nipple":ni, "spoke_count":s_count, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
+            
+            if st.form_submit_button("💾 Save Build Data"):
+                entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":fh, "r_hub":rh, "rim":rim, "spoke":sp, "nipple":ni, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
                 if mode == "Update Existing": 
                     df_builds = df_builds[df_builds['customer'] != cust]
-                # FIXED CONCAT LOGIC
+                
                 conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
-                st.success("Synced successfully!")
+                st.session_state.active_tab = "📊 Dashboard" # Return to home
+                st.success("Synced!")
                 st.rerun()
     except Exception as e: st.warning(f"Registration Error: {e}")
 
 # --- TAB: SPEC SHEET ---
 with tabs[4]:
-    st.header("📄 Portfolio Spec Sheet")
+    st.header("📄 Spec Sheet")
     df_builds = get_worksheet_data("builds")
     if not df_builds.empty:
         target = st.selectbox("Select Project", df_builds['customer'])
         d = df_builds[df_builds['customer'] == target].iloc[0]
-        
-        # SAFE RETRIEVAL FUNCTION
-        def get_safe_w(sheet_name, part_name):
-            try:
-                df = get_worksheet_data(sheet_name)
-                if 'weight' not in df.columns: return 0.0
-                match = df[(df['brand'] + " " + df['model']) == part_name]
-                return float(match['weight'].values[0]) if not match.empty else 0.0
-            except: return 0.0
-
-        w_rim, w_fh, w_rh = get_safe_w("rims", d['rim']), get_safe_w("hubs", d['f_hub']), get_safe_w("hubs", d['r_hub'])
-        w_sp, w_ni = get_safe_w("spokes", d['spoke']), get_safe_w("nipples", d['nipple'])
-        qty = d.get('spoke_count', 56)
-        total_set_weight = (w_rim * 2) + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
-
-        st.markdown(f"### Build for: **{target}**")
-        st.divider()
-        wc1, wc2, wc3 = st.columns(3)
-        wc1.write(f"**Rim (x2):** {d['rim']} ({w_rim}g)")
-        wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
-        wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
-        wc2.write(f"**Spokes:** {d['spoke']} ({w_sp}g)")
-        wc3.write(f"**Nipples:** {d['nipple']} ({w_ni}g)")
-        wc3.metric("Total Set Weight", f"{round(total_set_weight, 1)} g")
-        st.divider()
+        st.markdown(f"### Build Portfolio: **{target}**")
+        st.write(f"**Status:** {d.get('status', 'N/A')} | **Date:** {d['date']}")
         st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
-
