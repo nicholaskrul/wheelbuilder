@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v10.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v10.3", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -42,7 +42,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v10.1: Contextual Build Suite")
+st.title("🚲 ProWheel Lab v10.3: Calculator-Build Sync")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -112,7 +112,7 @@ with tabs[3]:
         hub_options = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_options = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
         
-        with st.form("build_form_v10.1"):
+        with st.form("build_form_v10.3"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
@@ -126,14 +126,19 @@ with tabs[3]:
             
             sp, ni = st.selectbox("Spoke", ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
             
-            # Smart Default: If one hub is None, default to single wheel spoke count
+            # Smart Default Spoke Qty
             default_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
             total_qty = st.number_input("Total Spokes (Set Total)", value=default_qty, step=2)
+
+            st.markdown("---")
+            # --- SHOW STAGED CALC VALUES AS REFERENCE ---
+            st.info(f"💡 **Current Calculator Values:** F: {st.session_state.f_l}/{st.session_state.f_r} | R: {st.session_state.r_l}/{st.session_state.r_r}")
             
-            # --- CONTEXTUAL SPOKE LENGTHS ---
             sc1, sc2, sc3, sc4 = st.columns(4)
+            # Front lengths only show if front hub isn't None
             vfl = sc1.number_input("F-L", value=st.session_state.f_l) if f_hub != "None" else 0.0
             vfr = sc2.number_input("F-R", value=st.session_state.f_r) if f_hub != "None" else 0.0
+            # Rear lengths only show if rear hub isn't None
             vrl = sc3.number_input("R-L", value=st.session_state.r_l) if r_hub != "None" else 0.0
             vrr = sc4.number_input("R-R", value=st.session_state.r_r) if r_hub != "None" else 0.0
             
@@ -183,6 +188,5 @@ with tabs[4]:
         
         wc3.metric("Total Weight", f"{round(total_w, 1)} g")
         st.divider()
-        # Only show relevant lengths
         if d['f_l'] > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
         if d['r_l'] > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
