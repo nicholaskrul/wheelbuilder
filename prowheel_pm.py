@@ -5,13 +5,12 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v8.5", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v8.6", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Intelligent caching (10 mins) to manage Google API Quota
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -30,16 +29,13 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     elif round_mode == "Nearest Odd": return float(round((length - 1) / 2) * 2 + 1)
     return round(length, 1)
 
-# --- 4. SESSION STATE & CALLBACKS ---
+# --- 4. SESSION STATE ---
 if 'edit_customer' not in st.session_state: st.session_state.edit_customer = None
 for key in ['f_l', 'f_r', 'r_l', 'r_r']:
     if key not in st.session_state: st.session_state[key] = 0.0
 
-def trigger_edit(customer_name):
-    st.session_state.edit_customer = customer_name
-
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 ProWheel Lab v8.5: Technical Portfolio Suite")
+st.title("🚲 ProWheel Lab v8.6: Stability & Precision")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
@@ -50,7 +46,6 @@ with tabs[0]:
     if st.button("🔄 Force Refresh Data"):
         st.cache_data.clear()
         st.rerun()
-    
     try:
         df_b = get_worksheet_data("builds")
         if not df_b.empty:
@@ -61,16 +56,13 @@ with tabs[0]:
                 col2.write(f"📅 {row['date']}")
                 col3.write(f"**Status:** {row.get('status', 'Order received')}")
                 if col4.button("Edit", key=f"edit_btn_{index}"):
-                    trigger_edit(row['customer'])
+                    st.session_state.edit_customer = row['customer']
                     st.rerun()
-        else:
-            st.info("No active builds found.")
-    except Exception as e:
-        st.error(f"Dashboard sync error: {e}")
+    except Exception as e: st.error(f"Sync error: {e}")
 
 # --- TAB: PRECISION CALC ---
 with tabs[1]:
-    st.header("🧮 Integrated Spoke Calculator")
+    st.header("🧮 Spoke Calculator")
     try:
         df_rims, df_hubs = get_worksheet_data("rims"), get_worksheet_data("hubs")
         calc_mode = st.radio("Source", ["Use Library", "Manual Entry"], horizontal=True)
@@ -84,121 +76,104 @@ with tabs[1]:
             erd, holes_init = sel_r['erd'], int(sel_r['holes'])
             l_fd, r_fd, l_os, r_os, l_sp, r_sp = sel_h['fd_l'], sel_h['fd_r'], sel_h['os_l'], sel_h['os_r'], sel_h['sp_off_l'], sel_h['sp_off_r']
         else:
-            m1, m2 = st.columns(2)
-            erd, holes_init = m1.number_input("Rim ERD", 601.0), 28
+            erd, holes_init = st.number_input("ERD", 601.0), 28
             l_fd, r_fd, l_os, r_os, l_sp, r_sp = 40.8, 36.0, 28.0, 40.2, 1.7, 1.8
 
         st.divider()
         i1, i2, i3 = st.columns(3)
         holes = i1.number_input("Spoke Count", value=holes_init, step=2)
-        l_cross = i2.selectbox("L-Cross", [0, 1, 2, 3, 4], index=3)
-        r_cross = i3.selectbox("R-Cross", [0, 1, 2, 3, 4], index=3)
-        
-        r_col1, r_col2 = st.columns(2)
-        is_sp = r_col1.toggle("Straightpull Hub?", value=True)
-        r_mode = r_col2.selectbox("Rounding Mode", ["None", "Nearest Even", "Nearest Odd"])
+        l_cross, r_cross = i2.selectbox("L-Cross", [0,1,2,3,4], index=3), i3.selectbox("R-Cross", [0,1,2,3,4], index=3)
+        is_sp, r_mode = st.toggle("Straightpull?", value=True), st.selectbox("Rounding", ["None", "Nearest Even", "Nearest Odd"])
         
         res_l = calculate_precision_spoke(erd, l_fd, l_os, holes, l_cross, is_sp, l_sp, 2.4, r_mode)
         res_r = calculate_precision_spoke(erd, r_fd, r_os, holes, r_cross, is_sp, r_sp, 2.4, r_mode)
         
-        m_col1, m_col2 = st.columns(2)
-        m_col1.metric("L Spoke", f"{res_l} mm")
-        m_col2.metric("R Spoke", f"{res_r} mm")
+        # FIXED UI: Metrics on separate lines
+        m1, m2 = st.columns(2)
+        m1.metric("L Spoke", f"{res_l} mm")
+        m2.metric("R Spoke", f"{res_r} mm")
         
-        side = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
-        if st.button("Apply to Build Form"):
+        if st.button("Apply to Build"):
+            side = st.radio("Target:", ["Front", "Rear"], horizontal=True)
             if side == "Front": st.session_state.f_l, st.session_state.f_r = res_l, res_r
             else: st.session_state.r_l, st.session_state.r_r = res_l, res_r
-            st.success(f"{side} staged!")
-    except Exception as e: st.error(f"Calculator Error: {e}")
+            st.success("Staged!")
+    except Exception as e: st.error(f"Error: {e}")
 
 # --- TAB: COMPONENT LIBRARY ---
 with tabs[2]:
-    st.header("📦 Library Management")
+    st.header("📦 Library")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form", clear_on_submit=True):
+    with st.form("lib_form_v86", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", step=0.1)
-        if l_type == "Rims":
-            e, h = st.number_input("ERD"), st.number_input("Holes")
-            if st.form_submit_button("Save Rim"):
-                new = pd.DataFrame([{"brand":b, "model":m, "erd":e, "holes":h, "weight":w}])
+        if st.form_submit_button("Save Component"):
+            if l_type == "Rims":
+                new = pd.DataFrame([{"brand":b, "model":m, "erd":st.number_input("ERD"), "holes":st.number_input("Holes"), "weight":w}])
                 conn.update(worksheet="rims", data=pd.concat([get_worksheet_data("rims",True), new], ignore_index=True))
-        elif l_type == "Hubs":
-            fl, fr, ol, orr, sl, sr = st.number_input("L-PCD"), st.number_input("R-PCD"), st.number_input("L-Dist"), st.number_input("R-Dist"), st.number_input("L-SP Off"), st.number_input("R-SP Off")
-            if st.form_submit_button("Save Hub"):
-                new = pd.DataFrame([{"brand":b, "model":m, "fd_l":fl, "fd_r":fr, "os_l":ol, "os_r":orr, "sp_off_l":sl, "sp_off_r":sr, "weight":w}])
+            elif l_type == "Hubs":
+                new = pd.DataFrame([{"brand":b, "model":m, "fd_l":0.0, "fd_r":0.0, "os_l":0.0, "os_r":0.0, "sp_off_l":0.0, "sp_off_r":0.0, "weight":w}])
                 conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs",True), new], ignore_index=True))
-        else:
-             if st.form_submit_button(f"Save {l_type}"):
+            else:
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
                 conn.update(worksheet=l_type.lower(), data=pd.concat([get_worksheet_data(l_type.lower(),True), new], ignore_index=True))
 
 # --- TAB: REGISTER BUILD ---
 with tabs[3]:
-    st.header("📝 Register / Update Build")
+    st.header("📝 Register Build")
     try:
         df_builds, df_rims, df_hubs = get_worksheet_data("builds"), get_worksheet_data("rims"), get_worksheet_data("hubs")
         df_spokes, df_nipples = get_worksheet_data("spokes"), get_worksheet_data("nipples")
-        
         mode = "Update Existing" if st.session_state.edit_customer else "New Build"
-        with st.form("build_form_v85"):
-            cust = st.text_input("Customer Name") if mode == "New Build" else st.selectbox("Project", list(df_builds['customer']), index=list(df_builds['customer']).index(st.session_state.edit_customer) if st.session_state.edit_customer in list(df_builds['customer']) else 0)
-            stat = st.selectbox("Build Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
+        with st.form("build_form_v86"):
+            cust = st.text_input("Customer", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
+            stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             rim = st.selectbox("Rim", df_rims['brand'] + " " + df_rims['model'])
             fh, rh = st.selectbox("Front Hub", df_hubs['brand'] + " " + df_hubs['model']), st.selectbox("Rear Hub", df_hubs['brand'] + " " + df_hubs['model'])
             sp, ni = st.selectbox("Spoke", df_spokes['brand'] + " " + df_spokes['model']), st.selectbox("Nipple", df_nipples['brand'] + " " + df_nipples['model'])
-            sc1, sc2, sc3, sc4 = st.columns(4)
-            vfl, vfr, vrl, vrr = sc1.number_input("F-L", value=st.session_state.f_l), sc2.number_input("F-R", value=st.session_state.f_r), sc3.number_input("R-L", value=st.session_state.r_l), sc4.number_input("R-R", value=st.session_state.r_r)
+            vfl, vfr, vrl, vrr = st.number_input("F-L", value=st.session_state.f_l), st.number_input("F-R", value=st.session_state.f_r), st.number_input("R-L", value=st.session_state.r_l), st.number_input("R-R", value=st.session_state.r_r)
             inv, notes = st.text_input("Invoice URL"), st.text_area("Notes")
-            if st.form_submit_button("Sync Build Data"):
+            if st.form_submit_button("Sync Build"):
                 entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":fh, "r_hub":rh, "rim":rim, "spoke":sp, "nipple":ni, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
                 if mode == "Update Existing": df_builds = df_builds[df_builds['customer'] != cust]
                 conn.update(worksheet="builds", data=pd.concat([df_builds, pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
-                st.success("Synced to Sheet!")
+                st.success("Synced!")
                 st.rerun()
     except Exception as e: st.warning(f"Error: {e}")
 
 # --- TAB: SPEC SHEET ---
 with tabs[4]:
-    st.header("📄 Portfolio Spec Sheet")
+    st.header("📄 Spec Sheet")
     df_builds = get_worksheet_data("builds")
     if not df_builds.empty:
         target = st.selectbox("Select Project", df_builds['customer'])
         d = df_builds[df_builds['customer'] == target].iloc[0]
         
-        # Data Retrieval for Weights
-        df_r, df_h, df_s, df_n = get_worksheet_data("rims"), get_worksheet_data("hubs"), get_worksheet_data("spokes"), get_worksheet_data("nipples")
-        
-        def get_w(df, val): return df[(df['brand'] + " " + df['model']) == val]['weight'].values[0] if val in (df['brand'] + " " + df['model']).values else 0.0
+        # SAFE WEIGHT RETRIEVAL logic to prevent KeyError
+        def get_safe_w(sheet_name, part_name):
+            try:
+                df = get_worksheet_data(sheet_name)
+                if 'weight' not in df.columns: return 0.0
+                match = df[(df['brand'] + " " + df['model']) == part_name]
+                return float(match['weight'].values[0]) if not match.empty else 0.0
+            except: return 0.0
 
-        w_rim = get_w(df_r, d['rim'])
-        w_fh = get_w(df_h, d['f_hub'])
-        w_rh = get_w(df_h, d['r_hub'])
-        w_sp = get_w(df_s, d['spoke'])
-        w_ni = get_w(df_n, d['nipple'])
+        w_rim, w_fh, w_rh = get_safe_w("rims", d['rim']), get_safe_w("hubs", d['f_hub']), get_safe_w("hubs", d['r_hub'])
+        w_sp, w_ni = get_safe_w("spokes", d['spoke']), get_safe_w("nipples", d['nipple'])
         
-        # Assumption: 28 spokes per wheel for weight calculation unless recorded otherwise
-        total_w = (w_rim * 2) + w_fh + w_rh + (w_sp * 56) + (w_ni * 56)
-
         st.markdown(f"### Build for: **{target}**")
-        st.write(f"**Current Status:** {d.get('status', 'Order received')} | **Date:** {d['date']}")
+        st.write(f"**Status:** {d.get('status', 'N/A')} | **Date:** {d['date']}")
+        st.divider()
+        st.markdown("#### 📏 Lengths")
+        st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
+        st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
         
         st.divider()
-        st.markdown("#### 📦 Technical Parts Breakdown")
-        t_col1, t_col2, t_col3 = st.columns(3)
-        t_col1.write(f"**Rim:** {d['rim']} ({w_rim}g)")
-        t_col1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
-        t_col2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
-        t_col2.write(f"**Spokes:** {d['spoke']} ({w_sp}g)")
-        t_col3.write(f"**Nipples:** {d['nipple']} ({w_ni}g)")
-        t_col3.metric("Est. Total Weight", f"{round(total_w, 1)} g")
-
-        st.divider()
-        st.markdown("#### 📏 Precision Spoke Lengths")
-        st.info(f"**Front Wheel:** L {d['f_l']} mm / R {d['f_r']} mm")
-        st.success(f"**Rear Wheel:** L {d['r_l']} mm / R {d['r_r']} mm")
+        st.markdown("#### 📦 Components & Weights")
+        st.write(f"- **Rim:** {d['rim']} ({w_rim}g)")
+        st.write(f"- **Hubs:** F: {d['f_hub']} ({w_fh}g) / R: {d['r_hub']} ({w_rh}g)")
+        st.write(f"- **Spokes:** {d['spoke']} ({w_sp}g) | **Nipples:** {d['nipple']} ({w_ni}g)")
         
-        if d.get('invoice_url'): st.markdown(f"🔗 [View Zoho Invoice]({d['invoice_url']})")
-        st.write(f"**Builder Notes:** {d['notes']}")
+        total_est = (w_rim * 2) + w_fh + w_rh + (w_sp * 56) + (w_ni * 56)
+        st.metric("Estimated Wheelset Weight", f"{round(total_est, 1)} g")
