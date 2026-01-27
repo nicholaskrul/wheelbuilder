@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="ProWheel Lab v10.7", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="ProWheel Lab v10.8", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -19,10 +19,12 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hol
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     if not is_sp:
+        # Standard J-Bend Geometry
         alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
+        # Straightpull Logic
         d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
         length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
     
@@ -43,7 +45,7 @@ def trigger_edit(customer_name):
     st.session_state.active_tab = "➕ Register Build"
 
 # --- 5. MAIN USER INTERFACE ---
-st.title("🚲 WheelBuilder Lab")
+st.title("🚲 Wheelbuilder Lab")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "📦 Inventory", "➕ Register Build", "📄 Spec Sheet"]
@@ -107,7 +109,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v10.7", clear_on_submit=True):
+    with st.form("lib_form_v10.8", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -124,14 +126,13 @@ with tabs[2]:
                 conn.update(worksheet="hubs", data=pd.concat([get_worksheet_data("hubs",True), new], ignore_index=True))
                 st.success("Hub saved!")
         elif l_type == "Spokes":
-            # UPDATED: Capturing Brand, Model, Type, Length, and Initial Quantity
             s_type = st.radio("Type", ["J-Bend", "Straightpull"], horizontal=True)
             s_len = st.number_input("Length (mm)", 200, 320, 290)
-            qty = st.number_input("Initial Quantity (In Stock)", 0, step=1)
+            qty = st.number_input("Initial Quantity", 0, step=1)
             if st.form_submit_button("Save Spoke Stock"):
                 new = pd.DataFrame([{"brand":b, "model":m, "type":s_type, "length":s_len, "weight":w, "stock":qty}])
                 conn.update(worksheet="spokes", data=pd.concat([get_worksheet_data("spokes",True), new], ignore_index=True))
-                st.success(f"{b} {m} ({s_len}mm {s_type}) saved!")
+                st.success(f"{b} {m} ({s_len}mm) saved!")
         else:
              if st.form_submit_button(f"Save {l_type}"):
                 new = pd.DataFrame([{"brand":b, "model":m, "weight":w}])
@@ -144,13 +145,12 @@ with tabs[3]:
     try:
         df_spokes = get_worksheet_data("spokes", force_refresh=True)
         if not df_spokes.empty:
-            # Defensive check for required columns
             for col in ['brand', 'model', 'type', 'length', 'stock']:
                 if col not in df_spokes.columns: df_spokes[col] = 0
             
             df_spokes = df_spokes.sort_values(by=['brand', 'model', 'length'])
             
-            with st.form("inventory_update_v10.7"):
+            with st.form("inventory_update_v10.8"):
                 updated_data = []
                 for idx, row in df_spokes.iterrows():
                     cols = st.columns([2, 1, 1, 1, 1])
@@ -158,7 +158,6 @@ with tabs[3]:
                     cols[1].write(f"{row['type']}")
                     cols[2].write(f"{row['length']}mm")
                     
-                    # UPDATED: Updating quantities on hand
                     current_q = int(pd.to_numeric(row['stock'], errors='coerce')) if not pd.isna(pd.to_numeric(row['stock'], errors='coerce')) else 0
                     new_q = cols[3].number_input("Quantity", value=current_q, key=f"inv_q_{idx}", step=1)
                     cols[4].write(f"Current: {current_q}")
@@ -171,8 +170,6 @@ with tabs[3]:
                     conn.update(worksheet="spokes", data=pd.DataFrame(updated_data))
                     st.success("Stock levels updated!")
                     st.rerun()
-        else:
-            st.info("No spoke data found. Add spokes via the 'Library' tab.")
     except Exception as e: st.error(f"Inventory sync error: {e}")
 
 # --- TAB: REGISTER BUILD ---
@@ -184,10 +181,9 @@ with tabs[4]:
         
         hub_opts = ["None"] + list(df_hubs['brand'] + " " + df_hubs['model'])
         rim_opts = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
-        # Granular spoke options
         sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'] + " (" + df_spokes['length'].astype(str) + "mm " + df_spokes['type'] + ")")
         
-        with st.form("build_form_v10.7"):
+        with st.form("build_form_v10.8"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
@@ -199,7 +195,6 @@ with tabs[4]:
             
             sp, ni = st.selectbox("Spoke Model/Type/Length", sp_opts), st.selectbox("Nipple", ["None"] + list(df_nipples['brand'] + " " + df_nipples['model']))
             
-            # Contextual Quantity Logic
             def_qty = int(st.session_state.staged_holes) if (f_hub == "None" or r_hub == "None") else int(st.session_state.staged_holes * 2)
             qty = st.number_input("Total Spokes Used", value=def_qty, step=2)
 
@@ -207,14 +202,16 @@ with tabs[4]:
             st.info(f"💡 **Calc Values:** F: {st.session_state.f_l}/{st.session_state.f_r} | R: {st.session_state.r_l}/{st.session_state.r_r}")
             
             sc1, sc2, sc3, sc4 = st.columns(4)
-            # Conditional inputs
             vfl = sc1.number_input("F-L", value=st.session_state.f_l) if f_hub != "None" else 0.0
             vfr = sc2.number_input("F-R", value=st.session_state.f_r) if f_hub != "None" else 0.0
             vrl = sc3.number_input("R-L", value=st.session_state.r_l) if r_hub != "None" else 0.0
             vrr = sc4.number_input("R-R", value=st.session_state.r_r) if r_hub != "None" else 0.0
             
+            inv = st.text_input("Invoice URL (Zoho/Cloud)")
+            notes = st.text_area("Notes")
+            
             if st.form_submit_button("💾 Save Build"):
-                entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":f_hub, "r_hub":r_hub, "f_rim":f_rim, "r_rim":r_rim, "spoke":sp, "nipple":ni, "spoke_count":qty, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr}
+                entry = {"date":datetime.now().strftime("%Y-%m-%d"), "customer":cust, "status":stat, "f_hub":f_hub, "r_hub":r_hub, "f_rim":f_rim, "r_rim":r_rim, "spoke":sp, "nipple":ni, "spoke_count":qty, "f_l":vfl, "f_r":vfr, "r_l":vrl, "r_r":vrr, "invoice_url":inv, "notes":notes}
                 conn.update(worksheet="builds", data=pd.concat([get_worksheet_data("builds"), pd.DataFrame([entry])], ignore_index=True))
                 st.session_state.edit_customer = None
                 st.session_state.active_tab = "📊 Dashboard"
@@ -234,7 +231,6 @@ with tabs[5]:
             if part_name == "None": return 0.0
             try:
                 df = get_worksheet_data(sheet_name)
-                # Parse granular spoke name
                 clean = part_name.split(' (')[0] if '(' in part_name else part_name
                 match = df[(df['brand'] + " " + df['model']) == clean]
                 if not match.empty:
@@ -261,7 +257,11 @@ with tabs[5]:
         if d.get('nipple', 'None') != 'None': wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
         
         wc3.metric("Total Weight", f"{round(total_w, 1)} g")
+        
+        # ADDED: DOWNLOAD INVOICE BUTTON
+        if d.get('invoice_url') and d['invoice_url'] != "":
+            st.link_button("📄 Download invoice", d['invoice_url'])
+        
         st.divider()
         if d['f_l'] > 0: st.info(f"**Front lengths:** L {d['f_l']} / R {d['f_r']} mm")
         if d['r_l'] > 0: st.success(f"**Rear lengths:** L {d['r_l']} / R {d['r_r']} mm")
-
