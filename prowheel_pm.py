@@ -5,13 +5,13 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v10.9", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v11.0", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    # Intelligent caching to manage API Quota
+    # Optimized caching to prevent API rate limiting
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 600)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
@@ -109,7 +109,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v10.9", clear_on_submit=True):
+    with st.form("lib_form_v11", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -148,7 +148,7 @@ with tabs[3]:
             for col in ['brand', 'model', 'type', 'length', 'stock']:
                 if col not in df_spokes.columns: df_spokes[col] = 0
             df_spokes = df_spokes.sort_values(by=['brand', 'model', 'length'])
-            with st.form("inventory_update_v10.9"):
+            with st.form("inventory_update_v11"):
                 updated_data = []
                 for idx, row in df_spokes.iterrows():
                     cols = st.columns([2, 1, 1, 1, 1])
@@ -178,7 +178,7 @@ with tabs[4]:
         rim_opts = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
         sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'] + " (" + df_spokes['length'].astype(str) + "mm " + df_spokes['type'] + ")")
         
-        with st.form("build_form_v10.9"):
+        with st.form("build_form_v11"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Parts received", "Build in progress", "Complete"])
             
@@ -213,65 +213,67 @@ with tabs[4]:
                 st.session_state.active_tab = "📊 Dashboard"
                 st.success("Build registered!")
                 st.rerun()
-    except Exception as e: st.error(f"⚠️ Tab Rendering Error: {e}. Please check your Google Sheet for non-numeric data in number columns.")
+    except Exception as e: st.error(f"⚠️ Tab Rendering Error: {e}. Check for non-numeric data in your Google Sheet.")
 
 # --- TAB: SPEC SHEET (RECOVERY MODE) ---
 with tabs[5]:
     st.header("📄 Portfolio Spec Sheet")
-    df_builds = get_worksheet_data("builds")
-    if not df_builds.empty:
-        target = st.selectbox("Select Project", df_builds['customer'])
-        d = df_builds[df_builds['customer'] == target].iloc[0]
-        
-        def get_safe_w(sheet_name, part_name):
-            if not part_name or part_name == "None" or str(part_name) == "nan": return 0.0
-            try:
-                df = get_worksheet_data(sheet_name)
-                clean = part_name.split(' (')[0] if '(' in str(part_name) else str(part_name)
-                match = df[(df['brand'] + " " + df['model']) == clean]
-                if not match.empty:
-                    val = pd.to_numeric(match['weight'].values[0], errors='coerce')
-                    return float(val) if not pd.isna(val) else 0.0
-                return 0.0
-            except: return 0.0
+    try:
+        df_builds = get_worksheet_data("builds")
+        if not df_builds.empty:
+            target = st.selectbox("Select Project", df_builds['customer'])
+            d = df_builds[df_builds['customer'] == target].iloc[0]
+            
+            def get_safe_w(sheet_name, part_name):
+                if not part_name or part_name == "None" or str(part_name) == "nan": return 0.0
+                try:
+                    df = get_worksheet_data(sheet_name)
+                    clean = str(part_name).split(' (')[0] if '(' in str(part_name) else str(part_name)
+                    match = df[(df['brand'] + " " + df['model']) == clean]
+                    if not match.empty:
+                        val = pd.to_numeric(match['weight'].values[0], errors='coerce')
+                        return float(val) if not pd.isna(val) else 0.0
+                    return 0.0
+                except: return 0.0
 
-        # --- LEGACY SCHEMA FALLBACK ---
-        raw_f_rim = d.get('f_rim', d.get('rim', 'None'))
-        raw_r_rim = d.get('r_rim', d.get('rim', 'None'))
-        
-        w_fr, w_rr = get_safe_w("rims", raw_f_rim), get_safe_w("rims", raw_r_rim)
-        w_fh, w_rh = get_safe_w("hubs", d.get('f_hub', 'None')), get_safe_w("hubs", d.get('r_hub', 'None'))
-        w_sp, w_ni = get_safe_w("spokes", d.get('spoke', 'None')), get_safe_w("nipples", d.get('nipple', 'None'))
-        
-        qty_val = pd.to_numeric(d.get('spoke_count', 0), errors='coerce')
-        qty = float(qty_val) if not pd.isna(qty_val) else 0.0
-        
-        total_w = w_fr + w_rr + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
+            # --- LEGACY SCHEMA FALLBACK ---
+            raw_f_rim = d.get('f_rim', d.get('rim', 'None'))
+            raw_r_rim = d.get('r_rim', d.get('rim', 'None'))
+            
+            w_fr, w_rr = get_safe_w("rims", raw_f_rim), get_safe_w("rims", raw_r_rim)
+            w_fh, w_rh = get_safe_w("hubs", d.get('f_hub', 'None')), get_safe_w("hubs", d.get('r_hub', 'None'))
+            w_sp, w_ni = get_safe_w("spokes", d.get('spoke', 'None')), get_safe_w("nipples", d.get('nipple', 'None'))
+            
+            # ROBUST DEFENSIVE CALCULATION
+            qty_val = pd.to_numeric(d.get('spoke_count', 0), errors='coerce')
+            qty = float(qty_val) if not pd.isna(qty_val) else 0.0
+            
+            total_w = w_fr + w_rr + w_fh + w_rh + (w_sp * qty) + (w_ni * qty)
 
-        st.markdown(f"### Build Portfolio: **{target}**")
-        st.divider()
-        wc1, wc2, wc3 = st.columns(3)
-        
-        # Display Logic: Combined Rims vs Separate
-        if raw_f_rim == raw_r_rim and raw_f_rim != "None":
-            wc1.write(f"**Rim (x2):** {raw_f_rim} ({w_fr}g ea)")
-        else:
-            if raw_f_rim != "None": wc1.write(f"**Front Rim:** {raw_f_rim} ({w_fr}g)")
-            if raw_r_rim != "None": wc1.write(f"**Rear Rim:** {raw_r_rim} ({w_rr}g)")
+            st.markdown(f"### Build Portfolio: **{target}**")
+            st.divider()
+            wc1, wc2, wc3 = st.columns(3)
+            
+            if raw_f_rim == raw_r_rim and raw_f_rim != "None":
+                wc1.write(f"**Rim (x2):** {raw_f_rim} ({w_fr}g ea)")
+            else:
+                if raw_f_rim != "None": wc1.write(f"**Front Rim:** {raw_f_rim} ({w_fr}g)")
+                if raw_r_rim != "None": wc1.write(f"**Rear Rim:** {raw_r_rim} ({w_rr}g)")
 
-        if d.get('f_hub', 'None') != 'None': wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
-        if d.get('r_hub', 'None') != 'None': wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
-        if d.get('spoke', 'None') != 'None': wc2.write(f"**Spokes (x{int(qty)}):** {d['spoke']} ({w_sp}g ea)")
-        if d.get('nipple', 'None') != 'None': wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
-        
-        if not pd.isna(total_w):
-            wc3.metric("Total Weight", f"{round(total_w, 1)} g")
-        else:
-            wc3.metric("Total Weight", "Data Missing")
-        
-        if d.get('invoice_url') and str(d['invoice_url']) != "nan":
-            st.link_button("📄 Download invoice", d['invoice_url'])
-        
-        st.divider()
-        if d.get('f_l', 0) > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
-        if d.get('r_l', 0) > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
+            if d.get('f_hub', 'None') != 'None': wc1.write(f"**Front Hub:** {d['f_hub']} ({w_fh}g)")
+            if d.get('r_hub', 'None') != 'None': wc2.write(f"**Rear Hub:** {d['r_hub']} ({w_rh}g)")
+            if d.get('spoke', 'None') != 'None': wc2.write(f"**Spokes (x{int(qty)}):** {d['spoke']} ({w_sp}g ea)")
+            if d.get('nipple', 'None') != 'None': wc3.write(f"**Nipples (x{int(qty)}):** {d['nipple']} ({w_ni}g ea)")
+            
+            if not pd.isna(total_w):
+                wc3.metric("Total Weight", f"{round(total_w, 1)} g")
+            else:
+                wc3.metric("Total Weight", "Data Incomplete")
+            
+            if d.get('invoice_url') and str(d['invoice_url']) != "nan":
+                st.link_button("📄 Download invoice", d['invoice_url'])
+            
+            st.divider()
+            if d.get('f_l', 0) > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
+            if d.get('r_l', 0) > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
+    except Exception as e: st.error(f"Spec Sheet Rendering Error: {e}")
