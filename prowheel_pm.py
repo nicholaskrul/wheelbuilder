@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.6", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.11", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -14,12 +14,12 @@ try:
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
 except Exception as e:
-    st.error("❌ Secrets Error: Check Streamlit Cloud Settings for [airtable] api_key and base_id.")
+    st.error("❌ Secrets Error: Check Streamlit Cloud Settings.")
     st.stop()
 
 @st.cache_data(ttl=600)
 def get_table(table_name):
-    """Fetches records and cleans data for safe lookup."""
+    """Hardened fetcher that handles both split and combined brand/model fields."""
     try:
         table = base.table(table_name)
         records = table.all()
@@ -28,28 +28,34 @@ def get_table(table_name):
         data = [ {**rec['fields'], 'id': rec['id']} for rec in records ]
         df = pd.DataFrame(data)
         
-        # Shield against 'None' values and handle Linked Record lists
-        text_cols = ['brand', 'model', 'customer', 'status', 'f_hub', 'r_hub', 
-                     'f_rim', 'r_rim', 'spoke', 'nipple', 'notes', 'invoice_url']
+        # Standardize Text
+        text_cols = ['brand', 'model', 'customer', 'status', 'f_hub', 'r_hub', 'f_rim', 'r_rim', 'spoke', 'nipple']
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
                 df[col] = df[col].fillna('').astype(str).str.strip()
         
+        # Logic: If brand and model exist, combine them. If only model exists, use that.
         if 'brand' in df.columns and 'model' in df.columns:
-            df['label'] = df['brand'].str.cat(df['model'], sep=" ").str.strip()
-            df = df[df['label'] != ""]
+            df['label'] = (df['brand'] + " " + df['model']).str.strip()
+        elif 'model' in df.columns:
+            df['label'] = df['model']
+        else:
+            # Fallback for tables like 'builds' where the first column might be 'customer'
+            df['label'] = df.iloc[:, 0].astype(str)
             
-        return df
+        return df[df['label'] != ""]
     except Exception as e:
-        st.warning(f"⚠️ Access issue with table '{table_name}'. Error: {e}")
+        st.warning(f"⚠️ Table '{table_name}' issue: {e}")
         return pd.DataFrame()
 
 # --- 3. HELPERS ---
-def get_weight(df, label):
-    if df.empty or not label: return 0.0
+def get_weight(df, search_string):
+    """Reliable weight lookup regardless of how the label was created."""
+    if df.empty or not search_string: return 0.0
     try:
-        match = df[df['label'] == label]
+        # We strip both sides of the match to be safe
+        match = df[df['label'].str.lower() == str(search_string).strip().lower()]
         if not match.empty and 'weight' in match.columns:
             val = match.iloc[0]['weight']
             return float(val) if val else 0.0
@@ -76,7 +82,7 @@ if 'editing_id' not in st.session_state:
 
 # --- 5. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v13.6 | Atomic Update Guard Active")
+st.caption("v13.11 | Atomic Data Guard Active")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
@@ -85,144 +91,92 @@ tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Re
 with tabs[0]:
     st.subheader("🏁 Workshop Pipeline")
     df_builds = get_table("builds")
-    
     if not df_builds.empty:
-        f1, f2 = st.columns([2, 1])
-        search = f1.text_input("🔍 Search Customer")
-        status_filter = f2.selectbox("Filter Status", ["All"] + sorted(list(df_builds['status'].unique())))
+        # Search/Filter UI
+        f1, f2 = st.columns([2,1])
+        q = f1.text_input("🔍 Search Customer")
+        stat = f2.selectbox("Status Filter", ["All"] + sorted(list(df_builds['status'].unique())))
         
-        filtered_df = df_builds.copy()
-        if search:
-            filtered_df = filtered_df[filtered_df['customer'].str.contains(search, case=False)]
-        if status_filter != "All":
-            filtered_df = filtered_df[filtered_df['status'] == status_filter]
+        view_df = df_builds.copy()
+        if q: view_df = view_df[view_df['customer'].str.contains(q, case=False)]
+        if stat != "All": view_df = view_df[view_df['status'] == stat]
 
-        for _, row in filtered_df.sort_values('date', ascending=False).iterrows():
+        for _, row in view_df.sort_values('date', ascending=False).iterrows():
             with st.expander(f"🛠️ {row['customer']} — {row['status']}"):
-                col_info, col_edit = st.columns([3, 1])
-                with col_info:
+                c_inf, c_ed = st.columns([3, 1])
+                with c_inf:
                     st.write(f"**Front:** {row.get('f_l', 0)} / {row.get('f_r', 0)} mm")
                     st.write(f"**Rear:** {row.get('r_l', 0)} / {row.get('r_r', 0)} mm")
-                with col_edit:
-                    if st.button("✏️ Edit", key=f"edit_b_{row['id']}"):
+                with c_ed:
+                    if st.button("✏️ Edit", key=f"btn_ed_{row['id']}"):
                         st.session_state.editing_id = row['id']
                 
                 if st.session_state.editing_id == row['id']:
                     st.markdown("---")
-                    with st.form(f"edit_atomic_{row['id']}"):
-                        new_stat = st.selectbox("Update Status", ["Order received", "Parts received", "Build in progress", "Complete"], 
-                                                index=["Order received", "Parts received", "Build in progress", "Complete"].index(row['status']) if row['status'] in ["Order received", "Parts received", "Build in progress", "Complete"] else 0)
-                        c1, c2, c3, c4 = st.columns(4)
-                        nl1 = c1.number_input("F-L", value=float(row.get('f_l', 0)))
-                        nr1 = c2.number_input("F-R", value=float(row.get('f_r', 0)))
-                        nl2 = c3.number_input("R-L", value=float(row.get('r_l', 0)))
-                        nr2 = c4.number_input("R-R", value=float(row.get('r_r', 0)))
-                        new_notes = st.text_area("Update Notes", value=str(row.get('notes', '')))
-                        
-                        if st.form_submit_button("💾 Save Changes"):
-                            # ATOMIC PAYLOAD: Only send non-linked, editable fields
-                            update_payload = {
-                                "status": str(new_stat),
-                                "f_l": round(float(nl1), 1),
-                                "f_r": round(float(nr1), 1),
-                                "r_l": round(float(nl2), 1),
-                                "r_r": round(float(nr2), 1),
-                                "notes": str(new_notes)
-                            }
-                            try:
-                                base.table("builds").update(row['id'], update_payload)
-                                st.session_state.editing_id = None
-                                st.cache_data.clear()
-                                st.success("Updated Successfully!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Update failed. This usually happens if Airtable columns are set to 'Read Only' or 'Formula'. Error: {e}")
-                    
-                    if st.button("Close", key=f"cls_{row['id']}"):
-                        st.session_state.editing_id = None
-                        st.rerun()
-    else: st.info("No active builds found.")
+                    with st.form(f"f_ed_v11_{row['id']}"):
+                        ns = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"], index=0)
+                        cl1, cl2, cl3, cl4 = st.columns(4)
+                        nl1, nr1 = cl1.number_input("F-L", value=float(row.get('f_l', 0))), cl2.number_input("F-R", value=float(row.get('f_r', 0)))
+                        nl2, nr2 = cl3.number_input("R-L", value=float(row.get('r_l', 0))), cl4.number_input("R-R", value=float(row.get('r_r', 0)))
+                        nt = st.text_area("Notes", value=str(row.get('notes', '')))
+                        if st.form_submit_button("💾 Save"):
+                            base.table("builds").update(row['id'], {"status": str(ns), "f_l": float(nl1), "f_r": float(nr1), "r_l": float(nl2), "r_r": float(nr2), "notes": str(nt)})
+                            st.session_state.editing_id = None
+                            st.cache_data.clear()
+                            st.rerun()
 
-# --- TAB 2: CALC ---
+# --- TAB 2: PRECISION CALC ---
 with tabs[1]:
     st.header("🧮 Spoke Calculator")
     df_rims, df_hubs = get_table("rims"), get_table("hubs")
     if not df_rims.empty and not df_hubs.empty:
         c1, c2 = st.columns(2)
-        rim_sel = c1.selectbox("Select Rim", df_rims['label'])
-        hub_sel = c2.selectbox("Select Hub", df_hubs['label'])
-        r_dat, h_dat = df_rims[df_rims['label']==rim_sel].iloc[0], df_hubs[df_hubs['label']==hub_sel].iloc[0]
-        
-        res_l = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_l', 0), h_dat.get('os_l', 0), 28, 3, True, h_dat.get('sp_off_l', 0))
-        res_r = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_r', 0), h_dat.get('os_r', 0), 28, 3, True, h_dat.get('sp_off_r', 0))
-        
+        r_sel = c1.selectbox("Select Rim", df_rims['label'])
+        h_sel = c2.selectbox("Select Hub", df_hubs['label'])
+        rd, hd = df_rims[df_rims['label']==r_sel].iloc[0], df_hubs[df_hubs['label']==h_sel].iloc[0]
+        res_l = calculate_precision_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), 28, 3, True, hd.get('sp_off_l',0))
+        res_r = calculate_precision_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), 28, 3, True, hd.get('sp_off_r',0))
         st.metric("Left", f"{res_l}mm"); st.metric("Right", f"{res_r}mm")
-        target = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
+        trg = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply"):
-            if target == "Front": st.session_state.staged['f_l'], st.session_state.staged['f_r'] = res_l, res_r
-            else: st.session_state.staged['r_l'], st.session_state.staged['r_r'] = res_l, res_r
+            k_l, k_r = ('f_l', 'f_r') if trg == "Front" else ('r_l', 'r_r')
+            st.session_state.staged[k_l], st.session_state.staged[k_r] = res_l, res_r
             st.success("Staged!")
-
-# --- TAB 3: LIBRARY ---
-with tabs[2]:
-    st.header("📦 Component Library")
-    lib = st.radio("Table:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
-    st.dataframe(get_table(lib), use_container_width=True)
-
-# --- TAB 4: REGISTER ---
-with tabs[3]:
-    st.header("📝 Register New Build")
-    df_rims, df_hubs, df_spk, df_nip = get_table("rims"), get_table("hubs"), get_table("spokes"), get_table("nipples")
-    if not df_rims.empty:
-        with st.form("reg_v13_6"):
-            cust = st.text_input("Customer Name")
-            f_r, r_r = st.selectbox("Front Rim", df_rims['label']), st.selectbox("Rear Rim", df_rims['label'])
-            f_h, r_h = st.selectbox("Front Hub", df_hubs['label']), st.selectbox("Rear Hub", df_hubs['label'])
-            s_mod, n_mod = st.selectbox("Spoke", df_spk['label']), st.selectbox("Nipple", df_nip['label'])
-            s_count = st.number_input("Spoke Count", value=56, step=4)
-            cl1, cl2, cl3, cl4 = st.columns(4)
-            vfl = cl1.number_input("F-L", value=float(st.session_state.staged['f_l']))
-            vfr = cl2.number_input("F-R", value=float(st.session_state.staged['f_r']))
-            vrl = cl3.number_input("R-L", value=float(st.session_state.staged['r_l']))
-            vrr = cl4.number_input("R-R", value=float(st.session_state.staged['r_r']))
-            stat = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"])
-            url = st.text_input("Invoice URL")
-            notes = st.text_area("Notes")
-            if st.form_submit_button("🚀 Finalize"):
-                base.table("builds").create({"date": datetime.now().strftime("%Y-%m-%d"), "customer": cust, "status": stat, "f_rim": f_r, "r_rim": r_r, "f_hub": f_h, "r_hub": r_h, "spoke": s_mod, "nipple": n_mod, "spoke_count": int(s_count), "f_l": vfl, "f_r": vfr, "r_l": vrl, "r_r": vrr, "invoice_url": url, "notes": notes})
-                st.cache_data.clear(); st.success("Build registered!"); st.rerun()
 
 # --- TAB 5: SPEC SHEET ---
 with tabs[4]:
     st.header("📄 Precision Spec Sheet")
     df_spec = get_table("builds")
+    df_r_lib, df_h_lib = get_table("rims"), get_table("hubs")
+    df_s_lib, df_n_lib = get_table("spokes"), get_table("nipples")
+
     if not df_spec.empty:
         selected = st.selectbox("Select Project", df_spec['customer'])
         b = df_spec[df_spec['customer'] == selected].iloc[0]
         
-        df_rim_lib, df_hub_lib = get_table("rims"), get_table("hubs")
-        df_spk_lib, df_nip_lib = get_table("spokes"), get_table("nipples")
+        # Lookups are now case-insensitive and whitespace-trimmed
+        w_fr, w_rr = get_weight(df_r_lib, b.get('f_rim')), get_weight(df_r_lib, b.get('r_rim'))
+        w_fh, w_rh = get_weight(df_h_lib, b.get('f_hub')), get_weight(df_h_lib, b.get('r_hub'))
+        w_s, w_n = get_weight(df_s_lib, b.get('spoke')), get_weight(df_n_lib, b.get('nipple'))
         
-        w_fr = get_weight(df_rim_lib, b.get('f_rim'))
-        w_rr = get_weight(df_rim_lib, b.get('r_rim'))
-        w_fh = get_weight(df_hub_lib, b.get('f_hub'))
-        w_rh = get_weight(df_hub_lib, b.get('r_hub'))
-        total_w = w_fr + w_rr + w_fh + w_rh + (int(b.get('spoke_count', 0)) * (get_weight(df_spk_lib, b.get('spoke')) + get_weight(df_nip_lib, b.get('nipple'))))
+        total_parts = int(b.get('spoke_count', 0)) * (w_s + w_n)
+        total_w = w_fr + w_rr + w_fh + w_rh + total_parts
 
-        st.subheader(f"Portfolio Record: {selected}")
+        st.subheader(f"Project Portfolio: {selected}")
         if b.get('invoice_url'): st.link_button("📄 Download Invoice", b['invoice_url'])
         st.divider()
+
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("### 🔘 Front Wheel")
             st.write(f"**Rim:** {b.get('f_rim')} ({w_fr}g)")
             st.write(f"**Hub:** {b.get('f_hub')} ({w_fh}g)")
-            st.info(f"**Lengths:** L {b.get('f_l', 0)}mm / R {b.get('f_r', 0)}mm")
         with col2:
             st.markdown("### 🔘 Rear Wheel")
             st.write(f"**Rim:** {b.get('r_rim')} ({w_rr}g)")
             st.write(f"**Hub:** {b.get('r_hub')} ({w_rh}g)")
-            st.success(f"**Lengths:** L {b.get('r_l', 0)}mm / R {b.get('r_r', 0)}mm")
+            
         st.divider()
         st.metric("Est. Total Weight", f"{int(total_w)}g")
+        
         if b.get('notes'): st.info(f"**Builder Notes:** {b.get('notes')}")
