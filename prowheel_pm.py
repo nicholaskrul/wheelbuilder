@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.4", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -65,8 +65,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.3")
-st.caption(f"Precision Analytics & Staging")
+st.title("🚲 Wheelbuilder Lab v13.4")
+st.caption(f"Advanced BOM Weight & Staging Suite")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -131,7 +131,7 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("final_build_registration_v13_3"):
+    with st.form("build_registration_v13_4"):
         customer = st.text_input("Customer Name")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received"}
         col_f, col_r = st.columns(2)
@@ -176,43 +176,51 @@ with tabs[3]:
         st.divider()
         st.markdown(f"### Technical Build Proof: **{selected_cust}**")
         
-        # BOM Weight Tracking
-        total_weight = 0.0
+        total_wheelset_weight = 0.0
+        ws_weight = float(get_comp_data(df_s_lib, b.get('spoke')).get('weight', 0))
+        wn_weight = float(get_comp_data(df_n_lib, b.get('nipple')).get('weight', 0))
         
-        c1, c2 = st.columns(2)
-        with c1:
+        col1, col2 = st.columns(2)
+        with col1:
             st.write("#### 🔘 Front Wheel")
             if b.get('f_rim'):
-                rd = get_comp_data(df_r_lib, b.get('f_rim'))
-                hd = get_comp_data(df_h_lib, b.get('f_hub'))
-                w_fr, w_fh, h_count = float(rd.get('weight', 0)), float(hd.get('weight', 0)), int(rd.get('holes', 28))
-                st.write(f"**Rim:** {b.get('f_rim')} ({w_fr}g)")
-                st.write(f"**Hub:** {b.get('f_hub')} ({w_fh}g)")
-                st.info(f"**Lengths:** L: {b.get('f_l')} / R: {b.get('f_r')} mm")
-                total_weight += (w_fr + w_fh)
-                # Spoke/Nipple calc for front
-                ws, wn = float(get_comp_data(df_s_lib, b.get('spoke')).get('weight', 0)), float(get_comp_data(df_n_lib, b.get('nipple')).get('weight', 0))
-                total_weight += (h_count * (ws + wn))
-            else: st.write("No front wheel in this build.")
+                frd = get_comp_data(df_r_lib, b.get('f_rim'))
+                fhd = get_comp_data(df_h_lib, b.get('f_hub'))
+                h_count = int(frd.get('holes', 28))
                 
-        with c2:
+                rim_w = float(frd.get('weight', 0))
+                hub_w = float(fhd.get('weight', 0))
+                parts_w = h_count * (ws_weight + wn_weight)
+                front_total = rim_w + hub_w + parts_w
+                total_wheelset_weight += front_total
+                
+                st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
+                st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
+                st.write(f"**Spokes/Nips:** {h_count} x ({ws_weight}g + {wn_weight}g) = {round(parts_w, 1)}g")
+                st.info(f"**Front Total:** {int(front_total)}g")
+            else: st.write("N/A")
+                
+        with col2:
             st.write("#### 🔘 Rear Wheel")
             if b.get('r_rim'):
-                rd = get_comp_data(df_r_lib, b.get('r_rim'))
-                hd = get_comp_data(df_h_lib, b.get('r_hub'))
-                w_rr, w_rh, h_count = float(rd.get('weight', 0)), float(hd.get('weight', 0)), int(rd.get('holes', 28))
-                st.write(f"**Rim:** {b.get('r_rim')} ({w_rr}g)")
-                st.write(f"**Hub:** {b.get('r_hub')} ({w_rh}g)")
-                st.success(f"**Lengths:** L: {b.get('r_l')} / R: {b.get('r_r')} mm")
-                total_weight += (w_rr + w_rh)
-                # Spoke/Nipple calc for rear
-                ws, wn = float(get_comp_data(df_s_lib, b.get('spoke')).get('weight', 0)), float(get_comp_data(df_n_lib, b.get('nipple')).get('weight', 0))
-                total_weight += (h_count * (ws + wn))
-            else: st.write("No rear wheel in this build.")
+                rrd = get_comp_data(df_r_lib, b.get('r_rim'))
+                rhd = get_comp_data(df_h_lib, b.get('r_hub'))
+                h_count = int(rrd.get('holes', 28))
+                
+                rim_w = float(rrd.get('weight', 0))
+                hub_w = float(rhd.get('weight', 0))
+                parts_w = h_count * (ws_weight + wn_weight)
+                rear_total = rim_w + hub_w + parts_w
+                total_wheelset_weight += rear_total
+                
+                st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
+                st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
+                st.write(f"**Spokes/Nips:** {h_count} x ({ws_weight}g + {wn_weight}g) = {round(parts_w, 1)}g")
+                st.success(f"**Rear Total:** {int(rear_total)}g")
+            else: st.write("N/A")
 
         st.divider()
-        st.metric("Estimated Total Wheelset Weight", f"{int(total_weight)}g")
-        st.caption(f"Includes {b.get('spoke')} spokes and {b.get('nipple')} nipples.")
+        st.metric("Estimated Total Wheelset Weight", f"{int(total_wheelset_weight)}g")
     else: st.info("No builds available.")
 
 # --- TAB 5: LIBRARY ---
