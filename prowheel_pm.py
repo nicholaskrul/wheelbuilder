@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.7", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.8", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -40,9 +40,13 @@ def fetch_data(table_name, label_col):
 
 # --- 3. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
-    """Retrieves the full row for a specific component label."""
+    """Retrieves component data using a case-insensitive, whitespace-agnostic match."""
     if df.empty or not label: return {}
-    match = df[df['label'] == label]
+    target = str(label).strip().lower()
+    # Create temporary normalized column for matching
+    df_norm = df.copy()
+    df_norm['match_label'] = df_norm['label'].str.strip().str.lower()
+    match = df_norm[df_norm['match_label'] == target]
     return match.iloc[0].to_dict() if not match.empty else {}
 
 def calculate_spoke(erd, fd, os, holes, crosses, is_sp=False, sp_off=0.0):
@@ -65,8 +69,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.7")
-st.caption(f"Granular Weight Analysis & Technical Proofs")
+st.title("🚲 Wheelbuilder Lab v13.8")
+st.caption("Hardened Spec Engine & BOM Analytics")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -116,7 +120,7 @@ with tabs[1]:
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
         
         st.divider()
-        target = st.radio("Stage these results for:", ["Front Wheel", "Rear Wheel"], horizontal=True)
+        target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True)
         if st.button("💾 Stage Component Data"):
             if target == "Front Wheel":
                 st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
@@ -131,23 +135,23 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("build_registration_v13_7"):
+    with st.form("build_registration_v13_8"):
         customer = st.text_input("Customer Name")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received"}
         col_f, col_r = st.columns(2)
         if build_type in ["Full Wheelset", "Front Only"]:
             with col_f:
                 st.subheader("Front Wheel")
-                f_rim = st.text_input("Front Rim", value=st.session_state.build_stage['f_rim'])
-                f_hub = st.text_input("Front Hub", value=st.session_state.build_stage['f_hub'])
+                f_rim = st.text_input("Front Rim Name", value=st.session_state.build_stage['f_rim'])
+                f_hub = st.text_input("Front Hub Name", value=st.session_state.build_stage['f_hub'])
                 f_l = st.number_input("F L-Length", value=st.session_state.build_stage['f_l'])
                 f_r = st.number_input("F R-Length", value=st.session_state.build_stage['f_r'])
                 payload.update({"f_rim": f_rim, "f_hub": f_hub, "f_l": f_l, "f_r": f_r})
         if build_type in ["Full Wheelset", "Rear Only"]:
             with col_r:
                 st.subheader("Rear Wheel")
-                r_rim = st.text_input("Rear Rim", value=st.session_state.build_stage['r_rim'])
-                r_hub = st.text_input("Rear Hub", value=st.session_state.build_stage['r_hub'])
+                r_rim = st.text_input("Rear Rim Name", value=st.session_state.build_stage['r_rim'])
+                r_hub = st.text_input("Rear Hub Name", value=st.session_state.build_stage['r_hub'])
                 r_l = st.number_input("R L-Length", value=st.session_state.build_stage['r_l'])
                 r_r = st.number_input("R R-Length", value=st.session_state.build_stage['r_r'])
                 payload.update({"r_rim": r_rim, "r_hub": r_hub, "r_l": r_l, "r_r": r_r})
@@ -169,7 +173,7 @@ with tabs[3]:
         selected_cust = st.selectbox("Select Customer Build", df_builds['label'].unique())
         b = df_builds[df_builds['label'] == selected_cust].iloc[0]
         
-        # Load Libraries for Deep Weight/Spec Lookup
+        # Load Libraries for Deep Weight Lookup
         df_r_lib, df_h_lib = fetch_data("rims", "rim"), fetch_data("hubs", "hub")
         df_s_lib, df_n_lib = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
         
@@ -188,21 +192,20 @@ with tabs[3]:
             if b.get('f_rim'):
                 frd = get_comp_data(df_r_lib, b.get('f_rim'))
                 fhd = get_comp_data(df_h_lib, b.get('f_hub'))
-                h_count = int(frd.get('holes', 28))
                 
+                # Diagnostic check if weight is 0
                 rim_w = float(frd.get('weight', 0))
                 hub_w = float(fhd.get('weight', 0))
-                spk_total_w = h_count * ws_weight
-                nip_total_w = h_count * wn_weight
-                front_total = rim_w + hub_w + spk_total_w + nip_total_w
+                h_count = int(frd.get('holes', 28))
+                
+                if rim_w == 0: st.error(f"⚠️ Weight missing for rim: '{b.get('f_rim')}'")
+                
+                front_total = rim_w + hub_w + (h_count * (ws_weight + wn_weight))
                 total_wheelset_weight += front_total
                 
                 st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
-                st.write(f"**Spokes:** {h_count} x {b.get('spoke')} ({round(spk_total_w, 1)}g)")
-                st.write(f"**Nipples:** {h_count} x {b.get('nipple')} ({round(nip_total_w, 1)}g)")
-                st.info(f"📏 **Lengths:** L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
-                st.write(f"**Front Total:** {int(front_total)}g")
+                st.write(f"**Lengths:** L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
             else: st.write("N/A")
                 
         with col2:
@@ -210,21 +213,19 @@ with tabs[3]:
             if b.get('r_rim'):
                 rrd = get_comp_data(df_r_lib, b.get('r_rim'))
                 rhd = get_comp_data(df_h_lib, b.get('r_hub'))
-                h_count = int(rrd.get('holes', 28))
                 
                 rim_w = float(rrd.get('weight', 0))
                 hub_w = float(rhd.get('weight', 0))
-                spk_total_w = h_count * ws_weight
-                nip_total_w = h_count * wn_weight
-                rear_total = rim_w + hub_w + spk_total_w + nip_total_w
+                h_count = int(rrd.get('holes', 28))
+                
+                if rim_w == 0: st.error(f"⚠️ Weight missing for rim: '{b.get('r_rim')}'")
+                
+                rear_total = rim_w + hub_w + (h_count * (ws_weight + wn_weight))
                 total_wheelset_weight += rear_total
                 
                 st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
-                st.write(f"**Spokes:** {h_count} x {b.get('spoke')} ({round(spk_total_w, 1)}g)")
-                st.write(f"**Nipples:** {h_count} x {b.get('nipple')} ({round(nip_total_w, 1)}g)")
-                st.success(f"📏 **Lengths:** L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
-                st.write(f"**Rear Total:** {int(rear_total)}g")
+                st.write(f"**Lengths:** L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
             else: st.write("N/A")
 
         st.divider()
