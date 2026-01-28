@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.5", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -19,7 +19,7 @@ except Exception as e:
 
 @st.cache_data(ttl=600)
 def get_table(table_name):
-    """Fetches records and cleans data for safe lookup."""
+    """Fetches records and cleans data for safe lookup across relational tables."""
     try:
         table = base.table(table_name)
         records = table.all()
@@ -75,7 +75,7 @@ if 'editing_id' not in st.session_state:
 
 # --- 5. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v13.4 | Sanitized Updates Active")
+st.caption("v13.5 | Variable Logic Anchor Active")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
@@ -88,7 +88,7 @@ with tabs[0]:
     if not df_builds.empty:
         f1, f2 = st.columns([2, 1])
         search = f1.text_input("🔍 Search Customer")
-        status_options = ["All"] + list(df_builds['status'].unique())
+        status_options = ["All"] + sorted(list(df_builds['status'].unique()))
         status_filter = f2.selectbox("Filter Status", status_options)
         
         filtered_df = df_builds.copy()
@@ -104,71 +104,67 @@ with tabs[0]:
                     st.write(f"**Front:** {row.get('f_l', 0)} / {row.get('f_r', 0)} mm")
                     st.write(f"**Rear:** {row.get('r_l', 0)} / {row.get('r_r', 0)} mm")
                 with col_edit:
-                    if st.button("✏️ Edit", key=f"edit_btn_{row['id']}"):
+                    if st.button("✏️ Edit", key=f"edit_dash_{row['id']}"):
                         st.session_state.editing_id = row['id']
                 
                 if st.session_state.editing_id == row['id']:
                     st.markdown("---")
-                    with st.form(f"edit_form_{row['id']}"):
-                        st.write(f"**Editing:** {row['customer']}")
+                    with st.form(f"edit_form_dash_{row['id']}"):
                         new_stat = st.selectbox("Update Status", ["Order received", "Parts received", "Build in progress", "Complete"], 
                                                 index=["Order received", "Parts received", "Build in progress", "Complete"].index(row['status']) if row['status'] in ["Order received", "Parts received", "Build in progress", "Complete"] else 0)
-                        
                         c1, c2, c3, c4 = st.columns(4)
-                        # Explicit float conversion to prevent HTTP Error
                         nl1 = c1.number_input("F-L", value=float(row.get('f_l', 0)))
                         nr1 = c2.number_input("F-R", value=float(row.get('f_r', 0)))
                         nl2 = c3.number_input("R-L", value=float(row.get('r_l', 0)))
                         nr2 = c4.number_input("R-R", value=float(row.get('r_r', 0)))
-                        
                         new_notes = st.text_area("Update Notes", value=str(row.get('notes', '')))
                         
-                        if st.form_submit_button("💾 Save to Airtable"):
-                            # Sanitizing the payload before transmission
-                            update_payload = {
-                                "status": str(new_stat),
-                                "f_l": float(nl1),
-                                "f_r": float(nr1),
-                                "r_l": float(nl2),
-                                "r_r": float(nr2),
-                                "notes": str(new_notes)
-                            }
-                            try:
-                                base.table("builds").update(row['id'], update_payload)
-                                st.session_state.editing_id = None
-                                st.cache_data.clear()
-                                st.success("Changes Saved!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to update Airtable: {e}")
-                    
-                    if st.button("Close Editor", key=f"close_{row['id']}"):
-                        st.session_state.editing_id = None
-                        st.rerun()
-    else:
-        st.info("No active builds found.")
+                        if st.form_submit_button("💾 Save Changes"):
+                            update_payload = {"status": str(new_stat), "f_l": float(nl1), "f_r": float(nr1), "r_l": float(nl2), "r_r": float(nr2), "notes": str(new_notes)}
+                            base.table("builds").update(row['id'], update_payload)
+                            st.session_state.editing_id = None
+                            st.cache_data.clear()
+                            st.success("Updated!")
+                            st.rerun()
+    else: st.info("Connect Airtable to see builds.")
 
-# --- TAB 2: CALC ---
+# --- TAB 2: PRECISION CALC (FIXED LOGIC) ---
 with tabs[1]:
     st.header("🧮 Spoke Calculator")
     df_rims, df_hubs = get_table("rims"), get_table("hubs")
-    if not df_rims.empty and not df_hubs.empty:
+    
+    # Anchor check: Only run if data exists to prevent NameError
+    if df_rims.empty or df_hubs.empty:
+        st.warning("⚠️ Library is empty. Please add rims and hubs to Airtable first.")
+    else:
         c1, c2 = st.columns(2)
-        r_sel = c1.selectbox("Select Rim", df_rims['label'])
-        h_sel = c2.selectbox("Select Hub", df_hubs['label'])
-        r_dat = df_rims[df_rims['label'] == r_sel].iloc[0]
+        rim_sel = c1.selectbox("Select Rim", df_rims['label'])
+        hub_sel = c2.selectbox("Select Hub", df_hubs['label'])
+        
+        # Now it is safe to define h_dat because hub_sel is guaranteed to exist
+        r_dat = df_rims[df_rims['label'] == rim_sel].iloc[0]
         h_dat = df_hubs[df_hubs['label'] == hub_sel].iloc[0]
+        
         st.divider()
-        res_l = calculate_precision_spoke(r_dat.get('erd',0), h_dat.get('fd_l',0), h_dat.get('os_l',0), 28, 3, True, h_dat.get('sp_off_l',0))
-        res_r = calculate_precision_spoke(r_dat.get('erd',0), h_dat.get('fd_r',0), h_dat.get('os_r',0), 28, 3, True, h_dat.get('sp_off_r',0))
-        st.metric("L Length", f"{res_l}mm"); st.metric("R Length", f"{res_r}mm")
-        target = st.radio("Stage to:", ["Front", "Rear"], horizontal=True)
+        i1, i2, i3 = st.columns(3)
+        holes = i1.number_input("Spoke Count", value=int(r_dat.get('holes', 28)), step=2)
+        l_cross = i2.selectbox("L-Cross", [0,1,2,3,4], index=3)
+        r_cross = i3.selectbox("R-Cross", [0,1,2,3,4], index=3)
+        is_sp = st.toggle("Straightpull Hub?", value=True)
+        
+        res_l = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_l', 0), h_dat.get('os_l', 0), holes, l_cross, is_sp, h_dat.get('sp_off_l', 0))
+        res_r = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_r', 0), h_dat.get('os_r', 0), holes, r_cross, is_sp, h_dat.get('sp_off_r', 0))
+        
+        st.metric("Left Length", f"{res_l} mm")
+        st.metric("Right Length", f"{res_r} mm")
+        
+        target = st.radio("Stage result to:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply and Stage"):
             if target == "Front":
                 st.session_state.staged['f_l'], st.session_state.staged['f_r'] = res_l, res_r
             else:
                 st.session_state.staged['r_l'], st.session_state.staged['r_r'] = res_l, res_r
-            st.success("Staged!")
+            st.success(f"Staged to {target}!")
 
 # --- TAB 3: LIBRARY ---
 with tabs[2]:
@@ -181,7 +177,7 @@ with tabs[3]:
     st.header("📝 Register New Build")
     df_rims, df_hubs, df_spk, df_nip = get_table("rims"), get_table("hubs"), get_table("spokes"), get_table("nipples")
     if not df_rims.empty:
-        with st.form("master_register_v13_4"):
+        with st.form("register_v13_5"):
             cust = st.text_input("Customer Name")
             f_r, r_r = st.selectbox("Front Rim", df_rims['label']), st.selectbox("Rear Rim", df_rims['label'])
             f_h, r_h = st.selectbox("Front Hub", df_hubs['label']), st.selectbox("Rear Hub", df_hubs['label'])
@@ -193,45 +189,33 @@ with tabs[3]:
             vfr = cl2.number_input("F-R", value=float(st.session_state.staged['f_r']))
             vrl = cl3.number_input("R-L", value=float(st.session_state.staged['r_l']))
             vrr = cl4.number_input("R-R", value=float(st.session_state.staged['r_r']))
-            stat = st.selectbox("Initial Status", ["Order received", "Parts received", "Build in progress", "Complete"])
+            stat = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"])
             url = st.text_input("Invoice URL")
             notes = st.text_area("Build Notes")
             if st.form_submit_button("🚀 Finalize Build"):
-                base.table("builds").create({
-                    "date": datetime.now().strftime("%Y-%m-%d"), "customer": cust, "status": stat,
-                    "f_rim": f_r, "r_rim": r_r, "f_hub": f_h, "r_hub": r_h,
-                    "spoke": s_mod, "nipple": n_mod, "spoke_count": int(s_count),
-                    "f_l": vfl, "f_r": vfr, "r_l": vrl, "r_r": vrr,
-                    "invoice_url": url, "notes": notes
-                })
-                st.cache_data.clear(); st.success("Build registered!"); st.rerun()
+                base.table("builds").create({"date": datetime.now().strftime("%Y-%m-%d"), "customer": cust, "status": stat, "f_rim": f_r, "r_rim": r_r, "f_hub": f_h, "r_hub": r_h, "spoke": s_mod, "nipple": n_mod, "spoke_count": int(s_count), "f_l": vfl, "f_r": vfr, "r_l": vrl, "r_r": vrr, "invoice_url": url, "notes": notes})
+                st.cache_data.clear(); st.success("Registered!"); st.rerun()
 
 # --- TAB 5: SPEC SHEET ---
 with tabs[4]:
     st.header("📄 Precision Spec Sheet")
     df_spec = get_table("builds")
-    df_rim_lib, df_hub_lib = get_table("rims"), get_table("hubs")
-    df_spk_lib, df_nip_lib = get_table("spokes"), get_table("nipples")
-
     if not df_spec.empty:
         selected = st.selectbox("Select Project", df_spec['customer'])
         b = df_spec[df_spec['customer'] == selected].iloc[0]
         
-        # Weight Lookups
+        # Deep lookup for weights
+        df_rim_lib, df_hub_lib = get_table("rims"), get_table("hubs")
+        df_spk_lib, df_nip_lib = get_table("spokes"), get_table("nipples")
         w_fr = get_weight(df_rim_lib, b.get('f_rim'))
         w_rr = get_weight(df_rim_lib, b.get('r_rim'))
         w_fh = get_weight(df_hub_lib, b.get('f_hub'))
         w_rh = get_weight(df_hub_lib, b.get('r_hub'))
-        w_spk_unit = get_weight(df_spk_lib, b.get('spoke'))
-        w_nip_unit = get_weight(df_nip_lib, b.get('nipple'))
-        actual_count = int(b.get('spoke_count', 0))
-        
-        total_wheelset = w_fr + w_rr + w_fh + w_rh + (actual_count * (w_spk_unit + w_nip_unit))
+        total_w = w_fr + w_rr + w_fh + w_rh + (int(b.get('spoke_count', 0)) * (get_weight(df_spk_lib, b.get('spoke')) + get_weight(df_nip_lib, b.get('nipple'))))
 
         st.subheader(f"Portfolio Record: {selected}")
         if b.get('invoice_url'): st.link_button("📄 Download Invoice", b['invoice_url'])
         st.divider()
-
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("### 🔘 Front Wheel")
@@ -243,12 +227,6 @@ with tabs[4]:
             st.write(f"**Rim:** {b.get('r_rim')} ({w_rr}g)")
             st.write(f"**Hub:** {b.get('r_hub')} ({w_rh}g)")
             st.success(f"**Lengths:** L {b.get('r_l', 0)}mm / R {b.get('r_r', 0)}mm")
-            
         st.divider()
-        st.markdown(f"### ⚖️ Technical Weight Breakdown")
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.metric("Est. Total Weight", f"{int(total_wheelset)}g")
-        sc2.write(f"**Spokes:** {actual_count} × {w_spk_unit}g")
-        sc3.write(f"**Nipples:** {actual_count} × {w_nip_unit}g")
-        
+        st.metric("Est. Total Weight", f"{int(total_w)}g")
         if b.get('notes'): st.info(f"**Builder Notes:** {b.get('notes')}")
