@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.6", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -65,8 +65,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.4")
-st.caption(f"Advanced BOM Weight & Staging Suite")
+st.title("🚲 Wheelbuilder Lab v13.6")
+st.caption(f"Precision Specs & Technical Proofs")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -131,7 +131,7 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("build_registration_v13_4"):
+    with st.form("build_registration_v13_6"):
         customer = st.text_input("Customer Name")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received"}
         col_f, col_r = st.columns(2)
@@ -169,7 +169,7 @@ with tabs[3]:
         selected_cust = st.selectbox("Select Customer Build", df_builds['label'].unique())
         b = df_builds[df_builds['label'] == selected_cust].iloc[0]
         
-        # Load Libraries for Deep Weight Lookup
+        # Load Libraries for Deep Weight/Spec Lookup
         df_r_lib, df_h_lib = fetch_data("rims", "rim"), fetch_data("hubs", "hub")
         df_s_lib, df_n_lib = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
         
@@ -196,8 +196,7 @@ with tabs[3]:
                 
                 st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
-                st.write(f"**Spokes/Nips:** {h_count} x ({ws_weight}g + {wn_weight}g) = {round(parts_w, 1)}g")
-                st.info(f"**Front Total:** {int(front_total)}g")
+                st.info(f"📏 **Lengths:** L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
             else: st.write("N/A")
                 
         with col2:
@@ -215,12 +214,12 @@ with tabs[3]:
                 
                 st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
-                st.write(f"**Spokes/Nips:** {h_count} x ({ws_weight}g + {wn_weight}g) = {round(parts_w, 1)}g")
-                st.success(f"**Rear Total:** {int(rear_total)}g")
+                st.success(f"📏 **Lengths:** L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
             else: st.write("N/A")
 
         st.divider()
         st.metric("Estimated Total Wheelset Weight", f"{int(total_wheelset_weight)}g")
+        st.caption(f"Spec based on {b.get('spoke')} spokes and {b.get('nipple')} nipples.")
     else: st.info("No builds available.")
 
 # --- TAB 5: LIBRARY ---
