@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.4", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -75,21 +75,21 @@ if 'editing_id' not in st.session_state:
 
 # --- 5. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v13.3 | Advanced Pipeline & Build Editor")
+st.caption("v13.4 | Sanitized Updates Active")
 st.markdown("---")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"])
 
-# --- TAB 1: DASHBOARD (FILTER & EDIT) ---
+# --- TAB 1: DASHBOARD ---
 with tabs[0]:
     st.subheader("🏁 Workshop Pipeline")
     df_builds = get_table("builds")
     
     if not df_builds.empty:
-        # Dashboard Filters
         f1, f2 = st.columns([2, 1])
         search = f1.text_input("🔍 Search Customer")
-        status_filter = f2.selectbox("Filter Status", ["All"] + list(df_builds['status'].unique()))
+        status_options = ["All"] + list(df_builds['status'].unique())
+        status_filter = f2.selectbox("Filter Status", status_options)
         
         filtered_df = df_builds.copy()
         if search:
@@ -101,42 +101,54 @@ with tabs[0]:
             with st.expander(f"🛠️ {row['customer']} — {row['status']}"):
                 col_info, col_edit = st.columns([3, 1])
                 with col_info:
-                    st.write(f"**Date:** {row['date']}")
-                    st.write(f"**Front:** {row['f_l']} / {row['f_r']} mm")
-                    st.write(f"**Rear:** {row['r_l']} / {row['r_r']} mm")
+                    st.write(f"**Front:** {row.get('f_l', 0)} / {row.get('f_r', 0)} mm")
+                    st.write(f"**Rear:** {row.get('r_l', 0)} / {row.get('r_r', 0)} mm")
                 with col_edit:
-                    if st.button("✏️ Edit Build", key=f"edit_{row['id']}"):
+                    if st.button("✏️ Edit", key=f"edit_btn_{row['id']}"):
                         st.session_state.editing_id = row['id']
                 
-                # Hidden Edit Form
                 if st.session_state.editing_id == row['id']:
                     st.markdown("---")
-                    st.write("### 📝 Edit Build Details")
-                    with st.form(f"form_{row['id']}"):
-                        new_stat = st.selectbox("Update Status", ["Order received", "Parts received", "Build in progress", "Complete"], index=0)
-                        c1, c2, c3, c4 = st.columns(4)
-                        nl1 = c1.number_input("F-L", value=float(row['f_l']))
-                        nr1 = c2.number_input("F-R", value=float(row['f_r']))
-                        nl2 = c3.number_input("R-L", value=float(row['r_l']))
-                        nr2 = c4.number_input("R-R", value=float(row['r_r']))
-                        new_notes = st.text_area("Update Notes", value=row['notes'])
+                    with st.form(f"edit_form_{row['id']}"):
+                        st.write(f"**Editing:** {row['customer']}")
+                        new_stat = st.selectbox("Update Status", ["Order received", "Parts received", "Build in progress", "Complete"], 
+                                                index=["Order received", "Parts received", "Build in progress", "Complete"].index(row['status']) if row['status'] in ["Order received", "Parts received", "Build in progress", "Complete"] else 0)
                         
-                        if st.form_submit_button("💾 Save Changes"):
-                            base.table("builds").update(row['id'], {
-                                "status": new_stat, "f_l": nl1, "f_r": nr1, 
-                                "r_l": nl2, "r_r": nr2, "notes": new_notes
-                            })
-                            st.session_state.editing_id = None
-                            st.cache_data.clear()
-                            st.success("Build Updated!")
-                            st.rerun()
-                    if st.button("Cancel", key=f"cancel_{row['id']}"):
+                        c1, c2, c3, c4 = st.columns(4)
+                        # Explicit float conversion to prevent HTTP Error
+                        nl1 = c1.number_input("F-L", value=float(row.get('f_l', 0)))
+                        nr1 = c2.number_input("F-R", value=float(row.get('f_r', 0)))
+                        nl2 = c3.number_input("R-L", value=float(row.get('r_l', 0)))
+                        nr2 = c4.number_input("R-R", value=float(row.get('r_r', 0)))
+                        
+                        new_notes = st.text_area("Update Notes", value=str(row.get('notes', '')))
+                        
+                        if st.form_submit_button("💾 Save to Airtable"):
+                            # Sanitizing the payload before transmission
+                            update_payload = {
+                                "status": str(new_stat),
+                                "f_l": float(nl1),
+                                "f_r": float(nr1),
+                                "r_l": float(nl2),
+                                "r_r": float(nr2),
+                                "notes": str(new_notes)
+                            }
+                            try:
+                                base.table("builds").update(row['id'], update_payload)
+                                st.session_state.editing_id = None
+                                st.cache_data.clear()
+                                st.success("Changes Saved!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to update Airtable: {e}")
+                    
+                    if st.button("Close Editor", key=f"close_{row['id']}"):
                         st.session_state.editing_id = None
                         st.rerun()
     else:
         st.info("No active builds found.")
 
-# --- TAB 2: PRECISION CALC ---
+# --- TAB 2: CALC ---
 with tabs[1]:
     st.header("🧮 Spoke Calculator")
     df_rims, df_hubs = get_table("rims"), get_table("hubs")
@@ -145,7 +157,7 @@ with tabs[1]:
         r_sel = c1.selectbox("Select Rim", df_rims['label'])
         h_sel = c2.selectbox("Select Hub", df_hubs['label'])
         r_dat = df_rims[df_rims['label'] == r_sel].iloc[0]
-        h_dat = df_hubs[df_hubs['label'] == h_sel].iloc[0]
+        h_dat = df_hubs[df_hubs['label'] == hub_sel].iloc[0]
         st.divider()
         res_l = calculate_precision_spoke(r_dat.get('erd',0), h_dat.get('fd_l',0), h_dat.get('os_l',0), 28, 3, True, h_dat.get('sp_off_l',0))
         res_r = calculate_precision_spoke(r_dat.get('erd',0), h_dat.get('fd_r',0), h_dat.get('os_r',0), 28, 3, True, h_dat.get('sp_off_r',0))
@@ -169,7 +181,7 @@ with tabs[3]:
     st.header("📝 Register New Build")
     df_rims, df_hubs, df_spk, df_nip = get_table("rims"), get_table("hubs"), get_table("spokes"), get_table("nipples")
     if not df_rims.empty:
-        with st.form("master_register_v13_3"):
+        with st.form("master_register_v13_4"):
             cust = st.text_input("Customer Name")
             f_r, r_r = st.selectbox("Front Rim", df_rims['label']), st.selectbox("Rear Rim", df_rims['label'])
             f_h, r_h = st.selectbox("Front Hub", df_hubs['label']), st.selectbox("Rear Hub", df_hubs['label'])
@@ -177,11 +189,11 @@ with tabs[3]:
             s_count = st.number_input("Total Spoke Count", value=56, step=4)
             st.divider()
             cl1, cl2, cl3, cl4 = st.columns(4)
-            vfl = cl1.number_input("F-L", value=st.session_state.staged['f_l'])
-            vfr = cl2.number_input("F-R", value=st.session_state.staged['f_r'])
-            vrl = cl3.number_input("R-L", value=st.session_state.staged['r_l'])
-            vrr = cl4.number_input("R-R", value=st.session_state.staged['r_r'])
-            stat = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"])
+            vfl = cl1.number_input("F-L", value=float(st.session_state.staged['f_l']))
+            vfr = cl2.number_input("F-R", value=float(st.session_state.staged['f_r']))
+            vrl = cl3.number_input("R-L", value=float(st.session_state.staged['r_l']))
+            vrr = cl4.number_input("R-R", value=float(st.session_state.staged['r_r']))
+            stat = st.selectbox("Initial Status", ["Order received", "Parts received", "Build in progress", "Complete"])
             url = st.text_input("Invoice URL")
             notes = st.text_area("Build Notes")
             if st.form_submit_button("🚀 Finalize Build"):
@@ -194,7 +206,7 @@ with tabs[3]:
                 })
                 st.cache_data.clear(); st.success("Build registered!"); st.rerun()
 
-# --- TAB 5: ADVANCED SPEC SHEET ---
+# --- TAB 5: SPEC SHEET ---
 with tabs[4]:
     st.header("📄 Precision Spec Sheet")
     df_spec = get_table("builds")
@@ -225,12 +237,12 @@ with tabs[4]:
             st.markdown("### 🔘 Front Wheel")
             st.write(f"**Rim:** {b.get('f_rim')} ({w_fr}g)")
             st.write(f"**Hub:** {b.get('f_hub')} ({w_fh}g)")
-            st.info(f"**Lengths:** L {b.get('f_l')}mm / R {b.get('f_r')}mm")
+            st.info(f"**Lengths:** L {b.get('f_l', 0)}mm / R {b.get('f_r', 0)}mm")
         with col2:
             st.markdown("### 🔘 Rear Wheel")
             st.write(f"**Rim:** {b.get('r_rim')} ({w_rr}g)")
             st.write(f"**Hub:** {b.get('r_hub')} ({w_rh}g)")
-            st.success(f"**Lengths:** L {b.get('r_l')}mm / R {b.get('r_r')}mm")
+            st.success(f"**Lengths:** L {b.get('r_l', 0)}mm / R {b.get('r_r', 0)}mm")
             
         st.divider()
         st.markdown(f"### ⚖️ Technical Weight Breakdown")
