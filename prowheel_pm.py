@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v12.12", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.1", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -14,32 +14,34 @@ try:
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
 except Exception as e:
-    st.error("❌ Secrets Error: Please ensure [airtable] api_key and base_id are correctly entered in Streamlit Cloud Settings.")
+    st.error("❌ Secrets Error: Please check your Streamlit Cloud Settings for [airtable] api_key and base_id.")
     st.stop()
 
 @st.cache_data(ttl=600)
 def get_table(table_name):
-    """Fetches records and cleans data using specific headers."""
+    """Fetches records and cleans data for safe lookup across all relational tables."""
     try:
         table = base.table(table_name)
         records = table.all()
         if not records: return pd.DataFrame()
         
+        # Flatten structure and include the unique Airtable Record ID
         data = [ {**rec['fields'], 'id': rec['id']} for rec in records ]
         df = pd.DataFrame(data)
         
-        # Shield against 'None' values in all text-based columns
+        # Shield against 'None' values and handle Linked Record lists (if present)
         text_cols = ['brand', 'model', 'customer', 'status', 'f_hub', 'r_hub', 
                      'f_rim', 'r_rim', 'spoke', 'nipple', 'notes', 'invoice_url']
         for col in text_cols:
             if col in df.columns:
-                # Handle potential list formats from Linked Records
+                # Extracts string if Airtable returns a list for linked records
                 df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
                 df[col] = df[col].fillna('').astype(str).str.strip()
         
         # Create a safe display label (combines Brand + Model)
         if 'brand' in df.columns and 'model' in df.columns:
             df['label'] = df['brand'].str.cat(df['model'], sep=" ").str.strip()
+            # Filter out "ghost rows" created by accidental Airtable clicks
             df = df[df['label'] != ""]
             
         return df
@@ -47,28 +49,42 @@ def get_table(table_name):
         st.warning(f"⚠️ Access issue with table '{table_name}'. Error: {e}")
         return pd.DataFrame()
 
-# --- 3. REFINED CALCULATION ENGINE (v11.5 Math) ---
+# --- 3. HELPER: PRECISION WEIGHT LOOKUP ---
+def get_weight(df, label):
+    """Searches a DataFrame for a component label and returns its weight as a float."""
+    if df.empty or not label: return 0.0
+    try:
+        match = df[df['label'] == label]
+        if not match.empty and 'weight' in match.columns:
+            val = match.iloc[0]['weight']
+            return float(val) if val else 0.0
+    except: pass
+    return 0.0
+
+# --- 4. CALCULATION ENGINE (v11.5 Math) ---
 def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset):
-    """Refined Engine for J-Bend and Straightpull pathing."""
+    """Calculates spoke length for both J-Bend and Straightpull geometries."""
     if not erd or not fd or not holes: return 0.0
     r_rim, r_hub = float(erd) / 2, float(fd) / 2
     alpha_rad = math.radians((float(crosses) * 720.0) / float(holes))
     
     if not is_sp:
+        # Standard J-Bend Geometry
         l_sq = (r_rim**2) + (r_hub**2) + (float(os)**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - 1.2 
     else:
+        # Refined Straightpull Logic
         base_l_sq = (r_rim**2) + (r_hub**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, base_l_sq + float(os)**2)) + float(sp_offset)
     return round(length, 1)
 
-# --- 4. SESSION STATE ---
+# --- 5. SESSION STATE ---
 if 'staged' not in st.session_state:
     st.session_state.staged = {'f_l': 0.0, 'f_r': 0.0, 'r_l': 0.0, 'r_r': 0.0}
 
-# --- 5. MAIN USER INTERFACE ---
+# --- 6. MAIN USER INTERFACE ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v12.12 | Master Spec Suite (Linked Record Fix)")
+st.caption("v13.1 | Precision Analytics & Deep Weight Lookup")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -87,14 +103,10 @@ with tabs[0]:
             df_builds = df_builds.sort_values('date', ascending=False)
             
         for _, row in df_builds.iterrows():
-            with st.container():
-                c1, c2, c3 = st.columns([2, 2, 1])
-                c1.write(f"**{row.get('customer', 'Unknown')}**")
-                c2.write(f"Status: `{row.get('status', 'N/A')}`")
-                c3.write(f"📅 {row.get('date', 'N/A')}")
-                st.divider()
+            st.write(f"**{row.get('customer', 'Unknown')}** | {row.get('date')} | Status: `{row.get('status', 'N/A')}`")
+            st.divider()
     else:
-        st.info("Awaiting builds from Airtable...")
+        st.info("No active builds found in Airtable.")
 
 # --- TAB 2: PRECISION CALC ---
 with tabs[1]:
@@ -114,14 +126,13 @@ with tabs[1]:
         holes = i1.number_input("Spoke Count", value=int(r_dat.get('holes', 28)), step=2)
         l_cross = i2.selectbox("L-Cross", [0,1,2,3,4], index=3)
         r_cross = i3.selectbox("R-Cross", [0,1,2,3,4], index=3)
-        
         is_sp = st.toggle("Straightpull Hub?", value=True)
         
         res_l = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_l', 0), h_dat.get('os_l', 0), holes, l_cross, is_sp, h_dat.get('sp_off_l', 0))
         res_r = calculate_precision_spoke(r_dat.get('erd', 0), h_dat.get('fd_r', 0), h_dat.get('os_r', 0), holes, r_cross, is_sp, h_dat.get('sp_off_r', 0))
         
-        st.metric("Left Spoke Length", f"{res_l} mm")
-        st.metric("Right Spoke Length", f"{res_r} mm")
+        st.metric("Left Length", f"{res_l} mm")
+        st.metric("Right Length", f"{res_r} mm")
         
         target = st.radio("Stage result to:", ["Front", "Rear"], horizontal=True)
         if st.button("Apply and Stage"):
@@ -129,7 +140,9 @@ with tabs[1]:
                 st.session_state.staged['f_l'], st.session_state.staged['f_r'] = res_l, res_r
             else:
                 st.session_state.staged['r_l'], st.session_state.staged['r_r'] = res_l, res_r
-            st.success(f"Successfully staged to {target}!")
+            st.success(f"Staged to {target}!")
+    else:
+        st.error("⚠️ Library Offline. Check Airtable base.")
 
 # --- TAB 3: LIBRARY ---
 with tabs[2]:
@@ -143,76 +156,84 @@ with tabs[3]:
     df_rims, df_hubs, df_spk, df_nip = get_table("rims"), get_table("hubs"), get_table("spokes"), get_table("nipples")
     
     if not df_rims.empty:
-        with st.form("master_build_form"):
-            col_a, col_b = st.columns(2)
-            cust = col_a.text_input("Customer Name")
-            date_b = col_b.date_input("Build Date", datetime.now())
-            
-            f_rim = st.selectbox("Front Rim", df_rims['label'])
-            r_rim = st.selectbox("Rear Rim", df_rims['label'])
-            f_hub = st.selectbox("Front Hub", df_hubs['label'])
-            r_hub = st.selectbox("Rear Hub", df_hubs['label'])
-            
-            c_spk, c_nip = st.columns(2)
-            spk_sel = c_spk.selectbox("Spoke Model", df_spk['label'])
-            nip_sel = c_nip.selectbox("Nipple Type", df_nip['label'])
-            
-            s_count = st.number_input("Total Spoke Count", value=int(df_rims[df_rims['label']==f_rim]['holes'].iloc[0]) * 2 if f_rim else 56)
+        with st.form("master_register_v13"):
+            cust = st.text_input("Customer Name")
+            f_r, r_r = st.selectbox("Front Rim", df_rims['label']), st.selectbox("Rear Rim", df_rims['label'])
+            f_h, r_h = st.selectbox("Front Hub", df_hubs['label']), st.selectbox("Rear Hub", df_hubs['label'])
+            s_mod = st.selectbox("Spoke Model", df_spk['label'])
+            n_mod = st.selectbox("Nipple Model", df_nip['label'])
+            s_count = st.number_input("Total Spoke Count", value=56, step=4)
             
             st.divider()
             cl1, cl2, cl3, cl4 = st.columns(4)
-            vfl, vfr = cl1.number_input("F-L", value=st.session_state.staged['f_l']), cl2.number_input("F-R", value=st.session_state.staged['f_r'])
-            vrl, vrr = cl3.number_input("R-L", value=st.session_state.staged['r_l']), cl4.number_input("R-R", value=st.session_state.staged['r_r'])
+            vfl = cl1.number_input("F-L", value=st.session_state.staged['f_l'])
+            vfr = cl2.number_input("F-R", value=st.session_state.staged['f_r'])
+            vrl = cl3.number_input("R-L", value=st.session_state.staged['r_l'])
+            vrr = cl4.number_input("R-R", value=st.session_state.staged['r_r'])
             
-            stat = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"])
+            stat = st.selectbox("Status", ["Parts received", "Build in progress", "Complete"])
             url = st.text_input("Invoice URL")
             notes = st.text_area("Build Notes")
             
-            if st.form_submit_button("🚀 Finalize & Save Build"):
+            if st.form_submit_button("🚀 Finalize Build"):
                 base.table("builds").create({
-                    "date": str(date_b), "customer": cust, "status": stat,
-                    "f_hub": f_hub, "r_hub": r_hub, "f_rim": f_rim, "r_rim": r_rim,
-                    "spoke": spk_sel, "spoke_count": int(s_count), "nipple": nip_sel,
+                    "date": datetime.now().strftime("%Y-%m-%d"), "customer": cust, "status": stat,
+                    "f_rim": f_r, "r_rim": r_r, "f_hub": f_h, "r_hub": r_h,
+                    "spoke": s_mod, "nipple": n_mod, "spoke_count": int(s_count),
                     "f_l": vfl, "f_r": vfr, "r_l": vrl, "r_r": vrr,
                     "invoice_url": url, "notes": notes
                 })
                 st.cache_data.clear()
-                st.success("Build registered successfully!")
+                st.success("Build registered!")
                 st.rerun()
 
-# --- TAB 5: SPEC SHEET ---
+# --- TAB 5: ADVANCED SPEC SHEET ---
 with tabs[4]:
-    st.header("📄 Portfolio Spec Sheet")
+    st.header("📄 Precision Spec Sheet")
     df_spec = get_table("builds")
+    df_rim_lib, df_hub_lib = get_table("rims"), get_table("hubs")
+    df_spk_lib, df_nip_lib = get_table("spokes"), get_table("nipples")
+
     if not df_spec.empty:
-        selected = st.selectbox("Select Build to View", df_spec['customer'])
+        selected = st.selectbox("Select Project", df_spec['customer'])
         b = df_spec[df_spec['customer'] == selected].iloc[0]
         
-        st.subheader(f"Project Portfolio: {selected}")
-        st.caption(f"Build Date: {b.get('date', 'N/A')}")
+        # 1. Basic Component Weight Lookups
+        w_fr = get_weight(df_rim_lib, b.get('f_rim'))
+        w_rr = get_weight(df_rim_lib, b.get('r_rim'))
+        w_fh = get_weight(df_hub_lib, b.get('f_hub'))
+        w_rh = get_weight(df_hub_lib, b.get('r_hub'))
         
-        if b.get('invoice_url'):
-            st.link_button("📄 Download Invoice", b['invoice_url'])
+        # 2. Deep Lookup for Small Parts (Weight per unit)
+        w_spk_unit = get_weight(df_spk_lib, b.get('spoke'))
+        w_nip_unit = get_weight(df_nip_lib, b.get('nipple'))
+        actual_count = int(b.get('spoke_count', 0))
         
+        # 3. Precision Totaling Logic
+        total_small_parts = actual_count * (w_spk_unit + w_nip_unit)
+        total_wheelset = w_fr + w_rr + w_fh + w_rh + total_small_parts
+
+        st.subheader(f"Portfolio Record: {selected}")
+        if b.get('invoice_url'): st.link_button("📄 Download Invoice", b['invoice_url'])
         st.divider()
+
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("### 🔘 Front Wheel")
-            st.write(f"**Rim:** {b.get('f_rim')}")
-            st.write(f"**Hub:** {b.get('f_hub')}")
+            st.write(f"**Rim:** {b.get('f_rim')} ({w_fr}g)")
+            st.write(f"**Hub:** {b.get('f_hub')} ({w_fh}g)")
             st.info(f"**Lengths:** L {b.get('f_l')}mm / R {b.get('f_r')}mm")
         with col2:
             st.markdown("### 🔘 Rear Wheel")
-            st.write(f"**Rim:** {b.get('r_rim')}")
-            st.write(f"**Hub:** {b.get('r_hub')}")
+            st.write(f"**Rim:** {b.get('r_rim')} ({w_rr}g)")
+            st.write(f"**Hub:** {b.get('r_hub')} ({w_rh}g)")
             st.success(f"**Lengths:** L {b.get('r_l')}mm / R {b.get('r_r')}mm")
             
         st.divider()
-        st.markdown(f"### ⚙️ Build Specs")
+        st.markdown(f"### ⚖️ Technical Weight Breakdown")
         sc1, sc2, sc3 = st.columns(3)
-        sc1.write(f"**Spoke Type:** {b.get('spoke')}")
-        sc2.write(f"**Nipple Type:** {b.get('nipple')}")
-        sc3.write(f"**Total Count:** {b.get('spoke_count')}")
+        sc1.metric("Est. Total Weight", f"{int(total_wheelset)}g")
+        sc2.write(f"**Spokes:** {actual_count} × {w_spk_unit}g")
+        sc3.write(f"**Nipples:** {actual_count} × {w_nip_unit}g")
         
-        if b.get('notes'):
-            st.info(f"**Builder Notes:** {b.get('notes')}")
+        if b.get('notes'): st.info(f"**Builder Notes:** {b.get('notes')}")
