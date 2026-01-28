@@ -5,17 +5,16 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v12.7", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v12.8", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
-# cite: 12.0
 try:
     AIRTABLE_API_KEY = st.secrets["airtable"]["api_key"]
     AIRTABLE_BASE_ID = st.secrets["airtable"]["base_id"]
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
 except Exception as e:
-    st.error("❌ Secrets Error: Please ensure [airtable] api_key and base_id are correctly entered in Streamlit Cloud Settings.")
+    st.error("❌ Secrets Error: Check Streamlit Cloud Settings for [airtable] api_key and base_id.")
     st.stop()
 
 @st.cache_data(ttl=600)
@@ -26,11 +25,10 @@ def get_table(table_name):
         records = table.all()
         if not records: return pd.DataFrame()
         
-        # Extract fields and include the unique Airtable ID
         data = [ {**rec['fields'], 'id': rec['id']} for rec in records ]
         df = pd.DataFrame(data)
         
-        # Dirty Data Shield: Fill NaN with empty strings to prevent math/string errors
+        # Fill NaN with empty strings to prevent concatenation errors
         for col in ['brand', 'model', 'customer', 'status']:
             if col in df.columns:
                 df[col] = df[col].fillna('').astype(str).str.strip()
@@ -38,17 +36,15 @@ def get_table(table_name):
         # Create a safe display label (combines Brand + Model)
         if 'brand' in df.columns and 'model' in df.columns:
             df['label'] = df['brand'].str.cat(df['model'], sep=" ").str.strip()
-            # Remove "ghost rows" where both brand and model were empty
             df = df[df['label'] != ""]
             
         return df
     except Exception as e:
-        st.warning(f"⚠️ Access issue with table '{table_name}'. Error: {e}")
+        st.warning(f"⚠️ Table '{table_name}' issue: {e}")
         return pd.DataFrame()
 
 # --- 3. REFINED CALCULATION ENGINE (v11.5) ---
 def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, round_mode="None"):
-    """Refined Engine for J-Bend and Straightpull."""
     if not erd or not fd or not holes: return 0.0
     r_rim, r_hub = float(erd) / 2, float(fd) / 2
     alpha_rad = math.radians((float(crosses) * 720.0) / float(holes))
@@ -56,7 +52,7 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, rou
     if not is_sp:
         # Standard J-Bend Geometry
         l_sq = (r_rim**2) + (r_hub**2) + (float(os)**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
-        length = math.sqrt(max(0, l_sq)) - 1.2 # Standard hole correction
+        length = math.sqrt(max(0, l_sq)) - 1.2 
     else:
         # Refined Straightpull Logic
         base_l_sq = (r_rim**2) + (r_hub**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
@@ -66,22 +62,22 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, rou
     elif round_mode == "Nearest Odd": return float(round((length - 1) / 2) * 2 + 1)
     return round(length, 1)
 
-# --- 4. SESSION STATE (Classic v10.4 Staging) ---
+# --- 4. SESSION STATE ---
 if 'staged' not in st.session_state:
     st.session_state.staged = {'f_l': 0.0, 'f_r': 0.0, 'r_l': 0.0, 'r_r': 0.0}
 
 # --- 5. MAIN USER INTERFACE ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v12.7 | Reverted UI + Airtable Backend")
+st.caption("v12.8 | Simplified Build Suite + Airtable")
 st.markdown("---")
 
-tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "📦 Inventory", "➕ Register Build", "📄 Spec Sheet"]
+tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
 tabs = st.tabs(tab_list)
 
 # --- TAB 1: DASHBOARD ---
 with tabs[0]:
     st.subheader("🏁 Workshop Pipeline")
-    if st.button("🔄 Force Data Refresh"):
+    if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
     
@@ -94,13 +90,13 @@ with tabs[0]:
             with st.expander(f"🛠️ {row.get('customer', 'Unknown')} — {row.get('status', 'N/A')}"):
                 c1, c2 = st.columns(2)
                 c1.write(f"**Date:** {row.get('date', 'N/A')}")
-                c1.write(f"**Components:** {row.get('f_rim', 'N/A')} / {row.get('f_hub', 'N/A')}")
-                c2.write(f"**Front Specs:** L {row.get('f_l')} / R {row.get('f_r')} mm")
-                c2.write(f"**Rear Specs:** L {row.get('r_l')} / R {row.get('r_r')} mm")
+                c1.write(f"**Spoke Model:** {row.get('spoke', 'N/A')}")
+                c2.write(f"**Front:** {row.get('f_l')} / {row.get('f_r')} mm")
+                c2.write(f"**Rear:** {row.get('r_l')} / {row.get('r_r')} mm")
     else:
         st.info("Awaiting builds from Airtable...")
 
-# --- TAB 2: PRECISION CALC (v10.4 Style) ---
+# --- TAB 2: PRECISION CALC ---
 with tabs[1]:
     st.header("🧮 Spoke Calculator")
     df_rims, df_hubs = get_table("rims"), get_table("hubs")
@@ -134,9 +130,9 @@ with tabs[1]:
                 st.session_state.staged['f_l'], st.session_state.staged['f_r'] = res_l, res_r
             else:
                 st.session_state.staged['r_l'], st.session_state.staged['r_r'] = res_l, res_r
-            st.success(f"Successfully staged to {target}!")
+            st.success(f"Staged to {target}!")
     else:
-        st.error("⚠️ Database Error: Table 'rims' or 'hubs' not found in Airtable.")
+        st.error("⚠️ Database Error: Check Airtable tables 'rims' and 'hubs'.")
 
 # --- TAB 3: LIBRARY ---
 with tabs[2]:
@@ -144,26 +140,8 @@ with tabs[2]:
     lib_choice = st.radio("View Table:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
     st.dataframe(get_table(lib_choice), use_container_width=True)
 
-# --- TAB 4: INVENTORY ---
+# --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
-    st.header("📦 Spoke Inventory")
-    df_inv = get_table("spoke_inventory")
-    if not df_inv.empty:
-        st.dataframe(df_inv[['brand', 'model', 'length', 'stock']], use_container_width=True)
-        
-        with st.form("inventory_update_v12_7"):
-            st.subheader("📝 Stock Adjustment")
-            target = st.selectbox("Select Spoke", df_inv['id'], 
-                                 format_func=lambda x: f"{df_inv[df_inv['id']==x]['label'].values[0]} ({df_inv[df_inv['id']==x]['length'].values[0]}mm)")
-            new_qty = st.number_input("New Stock Level", step=1)
-            if st.form_submit_button("💾 Save Update"):
-                base.table("spoke_inventory").update(target, {"stock": int(new_qty)})
-                st.cache_data.clear()
-                st.success("Airtable updated!")
-                st.rerun()
-
-# --- TAB 5: REGISTER BUILD ---
-with tabs[4]:
     st.header("📝 Register New Build")
     df_rims, df_hubs, df_spk = get_table("rims"), get_table("hubs"), get_table("spokes")
     
@@ -175,7 +153,7 @@ with tabs[4]:
             spk_sel = st.selectbox("Spoke Model", df_spk['label'])
             
             st.divider()
-            st.caption("Lengths from Calculator (Manual override possible)")
+            st.caption("Lengths from Calculator (Staged)")
             sc1, sc2, sc3, sc4 = st.columns(4)
             vfl = sc1.number_input("F-L", value=st.session_state.staged['f_l'])
             vfr = sc2.number_input("F-R", value=st.session_state.staged['f_r'])
@@ -192,25 +170,25 @@ with tabs[4]:
                     "date": datetime.now().strftime("%Y-%m-%d"), "status": stat, "invoice_url": inv
                 })
                 st.cache_data.clear()
-                st.success("Registered successfully!")
+                st.success("Build registered successfully!")
                 st.rerun()
 
-# --- TAB 6: SPEC SHEET ---
-with tabs[5]:
-    st.header("📄 Spec Sheet")
+# --- TAB 5: SPEC SHEET ---
+with tabs[4]:
+    st.header("📄 Portfolio Spec Sheet")
     df_spec = get_table("builds")
     if not df_spec.empty:
-        selected_project = st.selectbox("Select Build", df_spec['customer'])
+        selected_project = st.selectbox("Select Project", df_spec['customer'])
         b = df_spec[df_spec['customer'] == selected_project].iloc[0]
         
         st.subheader(f"Portfolio Record: {selected_project}")
         st.divider()
-        col_f, col_r = st.columns(2)
-        with col_f:
+        col1, col2 = st.columns(2)
+        with col1:
             st.markdown("#### Front Wheel")
-            st.write(f"**Rim:** {b.get('f_rim')}")
+            st.write(f"**Rim/Hub:** {b.get('f_rim')} / {b.get('f_hub')}")
             st.info(f"Lengths: L {b.get('f_l')} / R {b.get('f_r')} mm")
-        with col_r:
+        with col2:
             st.markdown("#### Rear Wheel")
-            st.write(f"**Rim:** {b.get('r_rim', b.get('f_rim'))}")
-            st.success(f"Lengths: L {b.get('r_l')} / R {b.get('r_r')} mm")
+            st.write(f"**Spoke Model:** {b.get('spoke')}")
+            st.success(f"Rear Lengths: L {b.get('r_l')} / R {b.get('r_r')} mm")
