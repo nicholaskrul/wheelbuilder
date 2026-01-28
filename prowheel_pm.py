@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.6", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.7", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -65,8 +65,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.6")
-st.caption(f"Precision Specs & Technical Proofs")
+st.title("🚲 Wheelbuilder Lab v13.7")
+st.caption(f"Granular Weight Analysis & Technical Proofs")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -84,8 +84,8 @@ with tabs[0]:
                     c1.write(f"**Front:** {row.get('f_rim')}\n{row.get('f_l')} / {row.get('f_r')} mm")
                 if row.get('r_rim'):
                     c2.write(f"**Rear:** {row.get('r_rim')}\n{row.get('r_l')} / {row.get('r_r')} mm")
-                new_stat = c3.selectbox("Status", ["Order Received", "Building", "Complete"], key=f"st_{row['id']}", 
-                                        index=["Order Received", "Building", "Complete"].index(row['status']) if row['status'] in ["Order Received", "Building", "Complete"] else 0)
+                new_stat = c3.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", 
+                                        index=["Order Received", "Parts Received", "Building", "Complete"].index(row['status']) if row['status'] in ["Order Received", "Parts Received", "Building", "Complete"] else 0)
                 if new_stat != row['status']:
                     base.table("builds").update(row['id'], {"status": new_stat})
                     st.rerun()
@@ -131,7 +131,7 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("build_registration_v13_6"):
+    with st.form("build_registration_v13_7"):
         customer = st.text_input("Customer Name")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received"}
         col_f, col_r = st.columns(2)
@@ -177,8 +177,10 @@ with tabs[3]:
         st.markdown(f"### Technical Build Proof: **{selected_cust}**")
         
         total_wheelset_weight = 0.0
-        ws_weight = float(get_comp_data(df_s_lib, b.get('spoke')).get('weight', 0))
-        wn_weight = float(get_comp_data(df_n_lib, b.get('nipple')).get('weight', 0))
+        ws_data = get_comp_data(df_s_lib, b.get('spoke'))
+        wn_data = get_comp_data(df_n_lib, b.get('nipple'))
+        ws_weight = float(ws_data.get('weight', 0))
+        wn_weight = float(wn_data.get('weight', 0))
         
         col1, col2 = st.columns(2)
         with col1:
@@ -190,13 +192,17 @@ with tabs[3]:
                 
                 rim_w = float(frd.get('weight', 0))
                 hub_w = float(fhd.get('weight', 0))
-                parts_w = h_count * (ws_weight + wn_weight)
-                front_total = rim_w + hub_w + parts_w
+                spk_total_w = h_count * ws_weight
+                nip_total_w = h_count * wn_weight
+                front_total = rim_w + hub_w + spk_total_w + nip_total_w
                 total_wheelset_weight += front_total
                 
                 st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
+                st.write(f"**Spokes:** {h_count} x {b.get('spoke')} ({round(spk_total_w, 1)}g)")
+                st.write(f"**Nipples:** {h_count} x {b.get('nipple')} ({round(nip_total_w, 1)}g)")
                 st.info(f"📏 **Lengths:** L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
+                st.write(f"**Front Total:** {int(front_total)}g")
             else: st.write("N/A")
                 
         with col2:
@@ -208,18 +214,21 @@ with tabs[3]:
                 
                 rim_w = float(rrd.get('weight', 0))
                 hub_w = float(rhd.get('weight', 0))
-                parts_w = h_count * (ws_weight + wn_weight)
-                rear_total = rim_w + hub_w + parts_w
+                spk_total_w = h_count * ws_weight
+                nip_total_w = h_count * wn_weight
+                rear_total = rim_w + hub_w + spk_total_w + nip_total_w
                 total_wheelset_weight += rear_total
                 
                 st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
+                st.write(f"**Spokes:** {h_count} x {b.get('spoke')} ({round(spk_total_w, 1)}g)")
+                st.write(f"**Nipples:** {h_count} x {b.get('nipple')} ({round(nip_total_w, 1)}g)")
                 st.success(f"📏 **Lengths:** L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
+                st.write(f"**Rear Total:** {int(rear_total)}g")
             else: st.write("N/A")
 
         st.divider()
         st.metric("Estimated Total Wheelset Weight", f"{int(total_wheelset_weight)}g")
-        st.caption(f"Spec based on {b.get('spoke')} spokes and {b.get('nipple')} nipples.")
     else: st.info("No builds available.")
 
 # --- TAB 5: LIBRARY ---
