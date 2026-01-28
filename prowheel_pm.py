@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v12.11", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v12.12", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -19,7 +19,7 @@ except Exception as e:
 
 @st.cache_data(ttl=600)
 def get_table(table_name):
-    """Fetches records and cleans data using the specific headers you provided."""
+    """Fetches records and cleans data using specific headers."""
     try:
         table = base.table(table_name)
         records = table.all()
@@ -33,6 +33,8 @@ def get_table(table_name):
                      'f_rim', 'r_rim', 'spoke', 'nipple', 'notes', 'invoice_url']
         for col in text_cols:
             if col in df.columns:
+                # Handle potential list formats from Linked Records
+                df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
                 df[col] = df[col].fillna('').astype(str).str.strip()
         
         # Create a safe display label (combines Brand + Model)
@@ -53,11 +55,9 @@ def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset):
     alpha_rad = math.radians((float(crosses) * 720.0) / float(holes))
     
     if not is_sp:
-        # Standard J-Bend Geometry
         l_sq = (r_rim**2) + (r_hub**2) + (float(os)**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
-        length = math.sqrt(max(0, l_sq)) - 1.2 # Standard hole diameter correction
+        length = math.sqrt(max(0, l_sq)) - 1.2 
     else:
-        # Refined Straightpull Logic
         base_l_sq = (r_rim**2) + (r_hub**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, base_l_sq + float(os)**2)) + float(sp_offset)
     return round(length, 1)
@@ -68,7 +68,7 @@ if 'staged' not in st.session_state:
 
 # --- 5. MAIN USER INTERFACE ---
 st.title("🚲 Wheelbuilder Lab")
-st.caption("v12.11 | Master Spec Suite")
+st.caption("v12.12 | Master Spec Suite (Linked Record Fix)")
 st.markdown("---")
 
 tab_list = ["📊 Dashboard", "🧮 Precision Calc", "📦 Library", "➕ Register Build", "📄 Spec Sheet"]
@@ -83,7 +83,6 @@ with tabs[0]:
         
     df_builds = get_table("builds")
     if not df_builds.empty:
-        # Sort by date
         if 'date' in df_builds.columns:
             df_builds = df_builds.sort_values('date', ascending=False)
             
@@ -105,10 +104,10 @@ with tabs[1]:
     if not df_rims.empty and not df_hubs.empty:
         col1, col2 = st.columns(2)
         r_sel = col1.selectbox("Select Rim", df_rims['label'])
-        h_sel = col2.selectbox("Select Hub", df_hubs['label'])
+        hub_sel = col2.selectbox("Select Hub", df_hubs['label'])
         
         r_dat = df_rims[df_rims['label'] == r_sel].iloc[0]
-        h_dat = df_hubs[df_hubs['label'] == h_sel].iloc[0]
+        h_dat = df_hubs[df_hubs['label'] == hub_sel].iloc[0]
         
         st.divider()
         i1, i2, i3 = st.columns(3)
@@ -131,8 +130,6 @@ with tabs[1]:
             else:
                 st.session_state.staged['r_l'], st.session_state.staged['r_r'] = res_l, res_r
             st.success(f"Successfully staged to {target}!")
-    else:
-        st.error("⚠️ Database Error: Table 'rims' or 'hubs' not found in Airtable.")
 
 # --- TAB 3: LIBRARY ---
 with tabs[2]:
@@ -160,18 +157,16 @@ with tabs[3]:
             spk_sel = c_spk.selectbox("Spoke Model", df_spk['label'])
             nip_sel = c_nip.selectbox("Nipple Type", df_nip['label'])
             
-            s_count = st.number_input("Total Spoke Count", value=56)
+            s_count = st.number_input("Total Spoke Count", value=int(df_rims[df_rims['label']==f_rim]['holes'].iloc[0]) * 2 if f_rim else 56)
             
             st.divider()
             cl1, cl2, cl3, cl4 = st.columns(4)
-            vfl = cl1.number_input("F-L", value=st.session_state.staged['f_l'])
-            vfr = cl2.number_input("F-R", value=st.session_state.staged['f_r'])
-            vrl = cl3.number_input("R-L", value=st.session_state.staged['r_l'])
-            vrr = cl4.number_input("R-R", value=st.session_state.staged['r_r'])
+            vfl, vfr = cl1.number_input("F-L", value=st.session_state.staged['f_l']), cl2.number_input("F-R", value=st.session_state.staged['f_r'])
+            vrl, vrr = cl3.number_input("R-L", value=st.session_state.staged['r_l']), cl4.number_input("R-R", value=st.session_state.staged['r_r'])
             
             stat = st.selectbox("Status", ["Order received", "Parts received", "Build in progress", "Complete"])
             url = st.text_input("Invoice URL")
-            notes = st.text_area("Build Notes (Tensions, Setup details, etc.)")
+            notes = st.text_area("Build Notes")
             
             if st.form_submit_button("🚀 Finalize & Save Build"):
                 base.table("builds").create({
@@ -221,5 +216,3 @@ with tabs[4]:
         
         if b.get('notes'):
             st.info(f"**Builder Notes:** {b.get('notes')}")
-    else:
-        st.info("Register a build to view spec sheets.")
