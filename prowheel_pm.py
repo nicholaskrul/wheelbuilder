@@ -5,37 +5,36 @@ import math
 from datetime import datetime
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v11.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v11.4", layout="wide", page_icon="🚲")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_worksheet_data(sheet_name, force_refresh=False):
-    """
-    Fetches data with a 15-minute cache to respect API rate limits.
-   
-    """
+    # Caching to manage API Quota
     return conn.read(worksheet=sheet_name, ttl=0 if force_refresh else 900)
 
 # --- 3. PRECISION CALCULATION LOGIC ---
 def calculate_precision_spoke(erd, fd, os, holes, crosses, is_sp, sp_offset, hole_diam=2.4, round_mode="None"):
     """
-    Calculates spoke length for J-Bend and Straightpull geometries.
-    Refined in v11.3 for better radial SP accuracy.
+    Refined in v11.4: Ensures crosses actually impact length for both J-Bend and SP.
+   
     """
     if 0 in [erd, fd, holes]: return 0.0
     r_rim, r_hub = erd / 2, fd / 2
     
+    # Calculate Angle Alpha based on crosses
+    alpha_rad = math.radians((crosses * 720.0) / holes)
+    
     if not is_sp:
         # Standard J-Bend Geometry
-        alpha_rad = math.radians((crosses * 720.0) / holes)
         l_sq = (r_rim**2) + (r_hub**2) + (os**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
         length = math.sqrt(max(0, l_sq)) - (hole_diam / 2)
     else:
         # Refined Straightpull Logic
-        # Calculates tangential path for non-zero crosses or radial SP offsets
-        d_tangent_2d = math.sqrt(max(0, r_rim**2 - r_hub**2))
-        length = math.sqrt(d_tangent_2d**2 + os**2) + sp_offset
+        # Factor in the cross angle for the base length before adding hub offset
+        base_l_sq = (r_rim**2) + (r_hub**2) - (2 * r_rim * r_hub * math.cos(alpha_rad))
+        length = math.sqrt(max(0, base_l_sq + os**2)) + sp_offset
     
     if round_mode == "Nearest Even": return float(round(length / 2) * 2)
     elif round_mode == "Nearest Odd": return float(round((length - 1) / 2) * 2 + 1)
@@ -124,7 +123,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📦 Library Management")
     l_type = st.selectbox("Category", ["Rims", "Hubs", "Spokes", "Nipples"])
-    with st.form("lib_form_v11_3", clear_on_submit=True):
+    with st.form("lib_form_v11_4", clear_on_submit=True):
         b, m = st.text_input("Brand"), st.text_input("Model")
         w = st.number_input("Weight (g)", 0.0, step=0.1)
         if l_type == "Rims":
@@ -156,12 +155,12 @@ with tabs[2]:
 with tabs[3]:
     st.header("📦 Spoke Inventory")
     try:
-        # cite: 11.1
+        # Separate inventory tracking
         df_inv = get_worksheet_data("spoke_inventory")
         if not df_inv.empty:
             st.dataframe(df_inv.sort_values(by=['brand', 'model', 'length']), use_container_width=True)
         else:
-            st.info("Inventory currently empty. Add items via your Google Sheet 'spoke_inventory' tab.")
+            st.info("Inventory currently empty.")
     except Exception as e: st.info(f"Inventory loading: {e}")
 
 # --- TAB: REGISTER BUILD ---
@@ -175,7 +174,7 @@ with tabs[4]:
         rim_opts = ["None"] + list(df_rims['brand'] + " " + df_rims['model'])
         sp_opts = ["None"] + list(df_spokes['brand'] + " " + df_spokes['model'])
         
-        with st.form("build_form_v11_3"):
+        with st.form("build_form_v11_4"):
             cust = st.text_input("Customer Name", value=st.session_state.edit_customer if st.session_state.edit_customer else "")
             stat = st.selectbox("Status", ["Order received", "Awaiting parts", "Build in progress", "Complete"])
             
