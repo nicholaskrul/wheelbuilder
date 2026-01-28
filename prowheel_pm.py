@@ -1,3 +1,6 @@
+from pyairtable import Api
+print("Airtable library imported successfully!")
+
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
@@ -298,3 +301,4 @@ with tabs[5]:
             if d.get('f_l', 0) > 0: st.info(f"**Front:** L {d['f_l']} / R {d['f_r']} mm")
             if d.get('r_l', 0) > 0: st.success(f"**Rear:** L {d['r_l']} / R {d['r_r']} mm")
     except Exception as e: st.error(f"Spec Sheet Error: {e}")
+
