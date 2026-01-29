@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.9", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v13.9.1", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -68,8 +68,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.9")
-st.caption("Advanced Workshop Suite | Business Integration")
+st.title("🚲 Wheelbuilder Lab v13.9.1")
+st.caption("Clean Library View | BOM Weights | Staging Logic")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -229,4 +229,9 @@ with tabs[3]:
 # --- TAB 5: LIBRARY ---
 with tabs[4]:
     choice = st.radio("View Library:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
-    st.dataframe(fetch_data(choice, "id"), use_container_width=True)
+    df_lib = fetch_data(choice, "id")
+    if not df_lib.empty:
+        # HIDE UNWANTED COLUMNS IN THE VIEW ONLY
+        view_df = df_lib.drop(columns=['id', 'label'], errors='ignore')
+        st.dataframe(view_df, use_container_width=True)
+
