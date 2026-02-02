@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v15.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v14.4", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v15.3")
-st.caption("Advanced Build Sheets | Triple Weight Metrics | Production Pipeline")
+st.title("🚲 Wheelbuilder Lab v15.4")
+st.caption("Live Workshop Management | Editable Build Journals")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "➕ Register Build", "📦 Library"])
 
@@ -122,7 +122,7 @@ with tabs[0]:
                 t_col1, t_col2 = st.columns([3, 1])
                 with t_col1:
                     current_status = row.get('status', 'Order Received')
-                    new_stat = st.selectbox("Update Workshop Status", ["Order Received", "Parts Received", "Building", "Complete"], 
+                    new_stat = st.selectbox("Update Status", ["Order Received", "Parts Received", "Building", "Complete"], 
                                             key=f"st_{row['id']}", 
                                             index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
                     if new_stat != current_status:
@@ -130,7 +130,7 @@ with tabs[0]:
                         st.rerun()
                 with t_col2:
                     if row.get('invoice_url'):
-                        st.link_button("📄 Open Invoice", row['invoice_url'], use_container_width=True)
+                        st.link_button("📄 Invoice", row['invoice_url'], use_container_width=True)
                 
                 st.divider()
                 c1, c2, c3 = st.columns(3)
@@ -145,7 +145,6 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Breakdown")
                             st.write(f"Rim: {int(f_calc['rim_w'])}g | Hub: {int(f_calc['hub_w'])}g")
-                            st.write(f"Spokes: {int(f_calc['spoke_total'])}g | Nipples: {int(f_calc['nipple_total'])}g")
                             st.metric("Front Mass", f"{int(f_calc['total'])}g")
                     else: st.write("N/A")
 
@@ -159,7 +158,6 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Breakdown")
                             st.write(f"Rim: {int(r_calc['rim_w'])}g | Hub: {int(r_calc['hub_w'])}g")
-                            st.write(f"Spokes: {int(r_calc['spoke_total'])}g | Nipples: {int(r_calc['nipple_total'])}g")
                             st.metric("Rear Mass", f"{int(r_calc['total'])}g")
                     else: st.write("N/A")
 
@@ -167,21 +165,27 @@ with tabs[0]:
                     st.markdown("**⚙️ LOGISTICS & TOTALS**")
                     st.write(f"**Spoke:** {row.get('spoke')}")
                     st.write(f"**Nipple:** {row.get('nipple')}")
-                    
                     st.divider()
                     st.metric("📦 WHEELSET TOTAL", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
 
-                    if current_status in ["Parts Received", "Building", "Complete"]:
-                        with st.popover("📝 Update Rim Serials"):
-                            fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
-                            rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
-                            if st.button("Save Serials", key=f"btn_{row['id']}"):
-                                base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs})
-                                st.rerun()
+                    # Popover for Data Entry (Serials and Notes)
+                    with st.popover("📝 Edit Build Details"):
+                        st.markdown("### Update Build Records")
+                        fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
+                        rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                        new_notes = st.text_area("Build Journal / Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                        
+                        if st.button("Update Record", key=f"btn_{row['id']}", use_container_width=True):
+                            base.table("builds").update(row['id'], {
+                                "f_rim_serial": fs, 
+                                "r_rim_serial": rs,
+                                "notes": new_notes
+                            })
+                            st.rerun()
                     
                     if row.get('notes'):
-                        st.markdown("**📋 Build Notes:**")
+                        st.markdown("**📋 Build Journal:**")
                         st.caption(row.get('notes'))
 
     else: st.info("Pipeline empty.")
@@ -216,7 +220,7 @@ with tabs[2]:
     st.header("📝 Register New Build")
     df_spk, df_nip = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v15_3"):
+    with st.form("reg_form_v15_4"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -251,7 +255,7 @@ with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component", expanded=False):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v15_3"):
+        with st.form("lib_add_v15_4"):
             name = st.text_input(f"New {cat} Name", key="lib_name")
             c1, c2 = st.columns(2)
             lib_p = {}
