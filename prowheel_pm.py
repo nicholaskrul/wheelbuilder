@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v14.4.3", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v14.4", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v14.4.3")
-st.caption("Restored Stability | Functional Staging Fix")
+st.title("🚲 Wheelbuilder Lab v14.4")
+st.caption("Stabilized Production Suite | Unique ID Handshake")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -76,7 +76,7 @@ with tabs[0]:
     st.subheader("🏁 Workshop Pipeline")
     df_builds = fetch_data("builds", "customer")
     if not df_builds.empty:
-        search = st.text_input("🔍 Search Customer", key="dash_search")
+        search = st.text_input("🔍 Search Customer")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False)] if search else df_builds
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date')})"):
@@ -97,9 +97,8 @@ with tabs[0]:
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                 with c3:
                     current_status = row.get('status', 'Order Received')
-                    status_options = ["Order Received", "Parts Received", "Building", "Complete"]
-                    new_stat = st.selectbox("Status", status_options, key=f"dash_stat_{row['id']}", 
-                                            index=status_options.index(current_status) if current_status in status_options else 0)
+                    new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"dash_stat_{row['id']}", 
+                                            index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
                     if new_stat != current_status:
                         base.table("builds").update(row['id'], {"status": new_stat}); st.rerun()
                     if current_status in ["Parts Received", "Building", "Complete"]:
@@ -116,8 +115,8 @@ with tabs[1]:
     df_rims, df_hubs = fetch_data("rims", "rim"), fetch_data("hubs", "hub")
     if not df_rims.empty and not df_hubs.empty:
         cr, ch = st.columns(2)
-        r_sel = cr.selectbox("Select Rim", df_rims['label'], key="calc_rim_sel")
-        h_sel = ch.selectbox("Select Hub", df_hubs['label'], key="calc_hub_sel")
+        r_sel = cr.selectbox("Select Rim", df_rims['label'])
+        h_sel = ch.selectbox("Select Hub", df_hubs['label'])
         rd, hd = get_comp_data(df_rims, r_sel), get_comp_data(df_hubs, h_sel)
         st.divider()
         col1, col2, col3 = st.columns(3)
@@ -129,10 +128,8 @@ with tabs[1]:
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
         target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
         if st.button("💾 Stage Component Data", key="calc_stage_btn"):
-            if target == "Front Wheel": 
-                st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
-            else: 
-                st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
+            if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
+            else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
             st.success(f"Staged {target}!")
 
 # --- TAB 3: REGISTER BUILD ---
@@ -140,10 +137,9 @@ with tabs[2]:
     st.header("📝 Register New Build")
     df_spk, df_nip = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    
-    with st.form("reg_form_v14_4_3"):
-        cust = st.text_input("Customer Name", key="reg_cname")
-        inv = st.text_input("Invoice URL", key="reg_inv")
+    with st.form("reg_form_v14_4"):
+        cust = st.text_input("Customer Name")
+        inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
         cf, cr = st.columns(2)
         if build_type in ["Full Wheelset", "Front Only"]:
@@ -167,8 +163,7 @@ with tabs[2]:
                         "nipple": sc2.selectbox("Nipple", df_nip['label'] if not df_nip.empty else ["Standard"], key="reg_nip"),
                         "notes": st.text_area("Notes", key="reg_notes")})
         if st.form_submit_button("🚀 Finalize Build"):
-            base.table("builds").create(payload)
-            st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
+            base.table("builds").create(payload); st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
             st.cache_data.clear(); st.success("Registered!"); st.rerun()
 
 # --- TAB 4: SPEC SHEET ---
@@ -180,12 +175,7 @@ with tabs[3]:
         b = df_b[df_b['label'] == sel].iloc[0]
         df_rl, df_hl, df_sl, df_nl = fetch_data("rims", "rim"), fetch_data("hubs", "hub"), fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
         st.divider()
-        
-        # --- URL SAFETY CHECK ---
-        raw_url = b.get('invoice_url')
-        if isinstance(raw_url, str) and len(raw_url) > 5:
-            st.link_button("📄 Open Invoice", raw_url, key="spec_inv_btn")
-            
+        if b.get('invoice_url'): st.link_button("📄 Open Invoice", b['invoice_url'])
         tw, sw, nw = 0.0, float(get_comp_data(df_sl, b.get('spoke')).get('weight',0)), float(get_comp_data(df_nl, b.get('nipple')).get('weight',0))
         cs1, cs2 = st.columns(2)
         with cs1:
