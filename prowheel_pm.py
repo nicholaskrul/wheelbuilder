@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v14.0", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v14.2", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -68,8 +68,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v14.0")
-st.caption("Inventory Traceability | Serial Number Tracking")
+st.title("🚲 Wheelbuilder Lab v14.2")
+st.caption("Advanced Workshop Dashboard | Full Technical View")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -80,45 +80,59 @@ with tabs[0]:
     if not df_builds.empty:
         search = st.text_input("🔍 Search Customer")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False)] if search else df_builds
+        
+        # Sort by date created (descending)
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', 'No Date')})"):
+                # Layout for Dashboard Summary
                 c1, c2, c3 = st.columns(3)
                 
-                # Front Wheel View
                 with c1:
+                    st.markdown("**🔘 FRONT WHEEL**")
                     if row.get('f_rim'):
-                        st.write(f"**Front:** {row.get('f_rim')}")
-                        st.caption(f"Ser: {row.get('f_rim_serial', '---')}")
-                    else: st.write("No Front Wheel")
+                        st.write(f"**Rim:** {row.get('f_rim')}")
+                        st.write(f"**Hub:** {row.get('f_hub', 'N/A')}")
+                        st.info(f"📏 L: {row.get('f_l', 0)} / R: {row.get('f_r', 0)} mm")
+                    else:
+                        st.write("*No Front Wheel*")
                 
-                # Rear Wheel View
                 with c2:
+                    st.markdown("**🔘 REAR WHEEL**")
                     if row.get('r_rim'):
-                        st.write(f"**Rear:** {row.get('r_rim')}")
-                        st.caption(f"Ser: {row.get('r_rim_serial', '---')}")
-                    else: st.write("No Rear Wheel")
+                        st.write(f"**Rim:** {row.get('r_rim')}")
+                        st.write(f"**Hub:** {row.get('r_hub', 'N/A')}")
+                        st.success(f"📏 L: {row.get('r_l', 0)} / R: {row.get('r_r', 0)} mm")
+                    else:
+                        st.write("*No Rear Wheel*")
                 
-                # Status & Serial Updates
                 with c3:
+                    st.markdown("**📦 BILL OF MATERIALS**")
+                    st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                    st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
+                    
+                    st.divider()
                     current_status = row.get('status', 'Order Received')
                     status_options = ["Order Received", "Parts Received", "Building", "Complete"]
-                    new_stat = st.selectbox("Status", status_options, key=f"st_{row['id']}", 
+                    new_stat = st.selectbox("Update Status", status_options, key=f"st_{row['id']}", 
                                             index=status_options.index(current_status) if current_status in status_options else 0)
                     
                     if new_stat != current_status:
                         base.table("builds").update(row['id'], {"status": new_stat})
                         st.rerun()
 
-                    # Inline Serial Update Logic
+                    # Serial Updates accessible from the dashboard
                     if current_status in ["Parts Received", "Building", "Complete"]:
-                        with st.popover("📝 Edit Serial Numbers"):
-                            new_f_ser = st.text_input("Front Rim Serial", value=row.get('f_rim_serial', ''), key=f"fser_{row['id']}")
-                            new_r_ser = st.text_input("Rear Rim Serial", value=row.get('r_rim_serial', ''), key=f"rser_{row['id']}")
-                            if st.button("Save Serials", key=f"btn_ser_{row['id']}"):
-                                base.table("builds").update(row['id'], {"f_rim_serial": new_f_ser, "r_rim_serial": new_r_ser})
-                                st.success("Updated!")
+                        with st.popover("🔑 Edit Rim Serials"):
+                            f_ser = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
+                            r_ser = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                            if st.button("Save Serials", key=f"upser_{row['id']}"):
+                                base.table("builds").update(row['id'], {"f_rim_serial": f_ser, "r_rim_serial": r_ser})
                                 st.rerun()
-    else: st.info("Pipeline empty.")
+                
+                if row.get('notes'):
+                    st.caption(f"**Notes:** {row['notes']}")
+    else:
+        st.info("Pipeline empty.")
 
 # --- TAB 2: CALCULATOR ---
 with tabs[1]:
@@ -160,7 +174,7 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("build_registration_v14_0"):
+    with st.form("build_registration_v14_2"):
         customer = st.text_input("Customer Name")
         inv_url = st.text_input("Invoice URL")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv_url}
@@ -173,7 +187,7 @@ with tabs[2]:
                 f_hub = st.text_input("Front Hub", value=st.session_state.build_stage['f_hub'])
                 f_l = st.number_input("F L-Length", value=st.session_state.build_stage['f_l'])
                 f_r = st.number_input("F R-Length", value=st.session_state.build_stage['f_r'])
-                f_ser = st.text_input("Front Rim Serial (Optional)")
+                f_ser = st.text_input("F Rim Serial")
                 payload.update({"f_rim": f_rim, "f_hub": f_hub, "f_l": f_l, "f_r": f_r, "f_rim_serial": f_ser})
         
         if build_type in ["Full Wheelset", "Rear Only"]:
@@ -183,7 +197,7 @@ with tabs[2]:
                 r_hub = st.text_input("Rear Hub", value=st.session_state.build_stage['r_hub'])
                 r_l = st.number_input("R L-Length", value=st.session_state.build_stage['r_l'])
                 r_r = st.number_input("R R-Length", value=st.session_state.build_stage['r_r'])
-                r_ser = st.text_input("Rear Rim Serial (Optional)")
+                r_ser = st.text_input("R Rim Serial")
                 payload.update({"r_rim": r_rim, "r_hub": r_hub, "r_l": r_l, "r_r": r_r, "r_rim_serial": r_ser})
         
         st.divider()
@@ -203,64 +217,4 @@ with tabs[3]:
     df_builds = fetch_data("builds", "customer")
     if not df_builds.empty:
         selected_cust = st.selectbox("Select Customer Build", df_builds['label'].unique())
-        b = df_builds[df_builds['label'] == selected_cust].iloc[0]
-        
-        df_r_lib, df_h_lib = fetch_data("rims", "rim"), fetch_data("hubs", "hub")
-        df_s_lib, df_n_lib = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
-        
-        st.divider()
-        col_header, col_invoice = st.columns([3, 1])
-        with col_header:
-            st.markdown(f"### Technical Build Proof: **{selected_cust}**")
-        with col_invoice:
-            if b.get('invoice_url'):
-                st.link_button("📄 Download Invoice", b['invoice_url'], use_container_width=True)
-        
-        total_wheelset_weight = 0.0
-        ws_data = get_comp_data(df_s_lib, b.get('spoke'))
-        wn_data = get_comp_data(df_n_lib, b.get('nipple'))
-        ws_weight = float(ws_data.get('weight', 0))
-        wn_weight = float(wn_data.get('weight', 0))
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("#### 🔘 Front Wheel")
-            if b.get('f_rim'):
-                frd = get_comp_data(df_r_lib, b.get('f_rim'))
-                fhd = get_comp_data(df_h_lib, b.get('f_hub'))
-                rim_w, hub_w = float(frd.get('weight', 0)), float(fhd.get('weight', 0))
-                h_count = int(frd.get('holes', 28))
-                front_total = rim_w + hub_w + (h_count * (ws_weight + wn_weight))
-                total_wheelset_weight += front_total
-                st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
-                st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
-                st.write(f"**Serial:** `{b.get('f_rim_serial', 'N/A')}`")
-                st.info(f"📏 L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
-            else: st.write("N/A")
-                
-        with col2:
-            st.write("#### 🔘 Rear Wheel")
-            if b.get('r_rim'):
-                rrd = get_comp_data(df_r_lib, b.get('r_rim'))
-                rhd = get_comp_data(df_h_lib, b.get('r_hub'))
-                rim_w, hub_w = float(rrd.get('weight', 0)), float(rhd.get('weight', 0))
-                h_count = int(rrd.get('holes', 28))
-                rear_total = rim_w + hub_w + (h_count * (ws_weight + wn_weight))
-                total_wheelset_weight += rear_total
-                st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
-                st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
-                st.write(f"**Serial:** `{b.get('r_rim_serial', 'N/A')}`")
-                st.success(f"📏 L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
-            else: st.write("N/A")
-
-        st.divider()
-        st.metric("Estimated Total Wheelset Weight", f"{int(total_wheelset_weight)}g")
-    else: st.info("No builds available.")
-
-# --- TAB 5: LIBRARY ---
-with tabs[4]:
-    choice = st.radio("View Library:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
-    df_lib = fetch_data(choice, "id")
-    if not df_lib.empty:
-        view_df = df_lib.drop(columns=['id', 'label'], errors='ignore')
-        st.dataframe(view_df, use_container_width=True)
+        b = df_builds
