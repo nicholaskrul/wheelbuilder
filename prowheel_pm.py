@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v14.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v14.5", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -14,7 +14,7 @@ try:
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
 except Exception as e:
-    st.error("❌ Airtable Secrets Error: Ensure secrets are configured.")
+    st.error("❌ Airtable Secrets Error: Ensure secrets are configured correctly.")
     st.stop()
 
 @st.cache_data(ttl=300)
@@ -58,7 +58,7 @@ def calculate_spoke(erd, fd, os, holes, crosses, is_sp=False, sp_off=0.0):
         length = math.sqrt(max(0, base_l_sq + float(os)**2)) + float(sp_off)
         return round(length, 1)
 
-# --- 4. SESSION STATE ---
+# --- 4. SESSION STATE INITIALIZATION ---
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
         'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0,
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v14.4")
-st.caption("Stabilized Production Suite | Unique ID Handshake")
+st.title("🚲 Wheelbuilder Lab v14.5")
+st.caption("Stabilized Session State | Precision Staging Fix")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -97,15 +97,15 @@ with tabs[0]:
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                 with c3:
                     current_status = row.get('status', 'Order Received')
-                    new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"dash_stat_{row['id']}", 
+                    new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"ds_{row['id']}", 
                                             index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
                     if new_stat != current_status:
                         base.table("builds").update(row['id'], {"status": new_stat}); st.rerun()
                     if current_status in ["Parts Received", "Building", "Complete"]:
                         with st.popover("📝 Rim Serials"):
-                            fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"dash_fs_{row['id']}")
-                            rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"dash_rs_{row['id']}")
-                            if st.button("Save Serials", key=f"dash_btn_{row['id']}"):
+                            fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fser_{row['id']}")
+                            rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rser_{row['id']}")
+                            if st.button("Save Serials", key=f"sav_{row['id']}"):
                                 base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs}); st.rerun()
     else: st.info("Pipeline empty.")
 
@@ -115,67 +115,91 @@ with tabs[1]:
     df_rims, df_hubs = fetch_data("rims", "rim"), fetch_data("hubs", "hub")
     if not df_rims.empty and not df_hubs.empty:
         cr, ch = st.columns(2)
-        r_sel = cr.selectbox("Select Rim", df_rims['label'])
-        h_sel = ch.selectbox("Select Hub", df_hubs['label'])
+        r_sel = cr.selectbox("Select Rim", df_rims['label'], key="calc_r_select")
+        h_sel = ch.selectbox("Select Hub", df_hubs['label'], key="calc_h_select")
         rd, hd = get_comp_data(df_rims, r_sel), get_comp_data(df_hubs, h_sel)
         st.divider()
         col1, col2, col3 = st.columns(3)
-        is_sp = col1.toggle("Straightpull?", value=True, key="calc_is_sp")
-        holes = col2.number_input("Hole Count", value=int(rd.get('holes', 28)), key="calc_holes")
-        cross = col3.selectbox("Crosses", [0,1,2,3,4], index=3, key="calc_cross")
+        is_sp = col1.toggle("Straightpull?", value=True)
+        holes = col2.number_input("Hole Count", value=int(rd.get('holes', 28)))
+        cross = col3.selectbox("Crosses", [0,1,2,3,4], index=3)
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
-        target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
-        if st.button("💾 Stage Component Data", key="calc_stage_btn"):
-            if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
-            else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
-            st.success(f"Staged {target}!")
+        
+        target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True)
+        if st.button("💾 Stage Component Data"):
+            if target == "Front Wheel":
+                st.session_state.build_stage['f_rim'] = r_sel
+                st.session_state.build_stage['f_hub'] = h_sel
+                st.session_state.build_stage['f_l'] = l_len
+                st.session_state.build_stage['f_r'] = r_len
+            else:
+                st.session_state.build_stage['r_rim'] = r_sel
+                st.session_state.build_stage['r_hub'] = h_sel
+                st.session_state.build_stage['r_l'] = l_len
+                st.session_state.build_stage['r_r'] = r_len
+            st.success(f"Staged {target} lengths!")
 
 # --- TAB 3: REGISTER BUILD ---
 with tabs[2]:
     st.header("📝 Register New Build")
+    if st.session_state.build_stage['f_rim'] or st.session_state.build_stage['r_rim']:
+        st.info("✅ Data detected from Calculator. Fields pre-populated.")
+    
     df_spk, df_nip = fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
-    build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v14_4"):
+    build_type = st.radio("Configuration:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True)
+    
+    with st.form("finalize_build_v14_5"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
+        
         cf, cr = st.columns(2)
         if build_type in ["Full Wheelset", "Front Only"]:
             with cf:
                 st.subheader("Front")
-                fr = st.text_input("Rim", value=st.session_state.build_stage['f_rim'], key="reg_f_rim")
-                fh = st.text_input("Hub", value=st.session_state.build_stage['f_hub'], key="reg_f_hub")
-                fl = st.number_input("L-Len", value=st.session_state.build_stage['f_l'], key="reg_f_l")
-                frr = st.number_input("R-Len", value=st.session_state.build_stage['f_r'], key="reg_f_r")
+                fr = st.text_input("Rim Name", value=st.session_state.build_stage['f_rim'])
+                fh = st.text_input("Hub Name", value=st.session_state.build_stage['f_hub'])
+                fl = st.number_input("Left Length (mm)", value=st.session_state.build_stage['f_l'])
+                frr = st.number_input("Right Length (mm)", value=st.session_state.build_stage['f_r'])
                 payload.update({"f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr})
+        
         if build_type in ["Full Wheelset", "Rear Only"]:
             with cr:
                 st.subheader("Rear")
-                rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_r_rim")
-                rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_r_hub")
-                rl = st.number_input("L-Len", value=st.session_state.build_stage['r_l'], key="reg_r_l")
-                rrr = st.number_input("R-Len", value=st.session_state.build_stage['r_r'], key="reg_r_r")
+                rr = st.text_input("Rim Name", value=st.session_state.build_stage['r_rim'])
+                rh = st.text_input("Hub Name", value=st.session_state.build_stage['r_hub'])
+                rl = st.number_input("Left Length (mm)", value=st.session_state.build_stage['r_l'])
+                rrr = st.number_input("Right Length (mm)", value=st.session_state.build_stage['r_r'])
                 payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
+        
         sc1, sc2 = st.columns(2)
-        payload.update({"spoke": sc1.selectbox("Spoke", df_spk['label'] if not df_spk.empty else ["Standard"], key="reg_spk"),
-                        "nipple": sc2.selectbox("Nipple", df_nip['label'] if not df_nip.empty else ["Standard"], key="reg_nip"),
-                        "notes": st.text_area("Notes", key="reg_notes")})
+        spk_choice = sc1.selectbox("Spoke Model", df_spk['label'] if not df_spk.empty else ["Standard"])
+        nip_choice = sc2.selectbox("Nipple Model", df_nip['label'] if not df_nip.empty else ["Standard"])
+        notes = st.text_area("Workshop Notes")
+        
+        payload.update({"spoke": spk_choice, "nipple": nip_choice, "notes": notes})
+        
         if st.form_submit_button("🚀 Finalize Build"):
-            base.table("builds").create(payload); st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
-            st.cache_data.clear(); st.success("Registered!"); st.rerun()
+            base.table("builds").create(payload)
+            # Reset stage after successful registration
+            st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
+            st.cache_data.clear()
+            st.success("Build Registered Successfully!")
+            st.rerun()
 
 # --- TAB 4: SPEC SHEET ---
 with tabs[3]:
     st.header("📄 Technical Spec Sheet")
     df_b = fetch_data("builds", "customer")
     if not df_b.empty:
-        sel = st.selectbox("Select Build", df_b['label'].unique(), key="spec_sel")
+        sel = st.selectbox("Select Build", df_b['label'].unique())
         b = df_b[df_b['label'] == sel].iloc[0]
         df_rl, df_hl, df_sl, df_nl = fetch_data("rims", "rim"), fetch_data("hubs", "hub"), fetch_data("spokes", "spoke"), fetch_data("nipples", "nipple")
         st.divider()
         if b.get('invoice_url'): st.link_button("📄 Open Invoice", b['invoice_url'])
+        
         tw, sw, nw = 0.0, float(get_comp_data(df_sl, b.get('spoke')).get('weight',0)), float(get_comp_data(df_nl, b.get('nipple')).get('weight',0))
         cs1, cs2 = st.columns(2)
         with cs1:
@@ -199,32 +223,27 @@ with tabs[3]:
 with tabs[4]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component", expanded=False):
-        cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_form"):
-            name = st.text_input(f"New {cat} Name", key="lib_name")
+        cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="new_cat")
+        with st.form("lib_add_new"):
+            name = st.text_input(f"New {cat} Name")
             c1, c2 = st.columns(2)
-            lib_payload = {}
+            lib_p = {}
             if cat == "Rim":
-                lib_payload = {"rim": name, "erd": c1.number_input("ERD (mm)", step=0.1, key="lib_rim_erd"), 
-                               "holes": c2.number_input("Hole Count", step=1, value=28, key="lib_rim_holes"), 
-                               "weight": st.number_input("Weight (g)", step=0.1, key="lib_rim_w")}
+                lib_p = {"rim": name, "erd": c1.number_input("ERD (mm)", step=0.1), "holes": c2.number_input("Hole Count", step=1, value=28), "weight": st.number_input("Weight (g)", step=0.1)}
             elif cat == "Hub":
-                lib_payload = {"hub": name, "fd_l": c1.number_input("FD Left", step=0.1, key="lib_h_fdl"), 
-                               "fd_r": c2.number_input("FD Right", step=0.1, key="lib_h_fdr"), 
-                               "os_l": c1.number_input("Offset Left", step=0.1, key="lib_h_osl"), 
-                               "os_r": c2.number_input("Offset Right", step=0.1, key="lib_h_osr"),
-                               "sp_off_l": c1.number_input("SP Offset L", value=0.0, key="lib_h_spl"), 
-                               "sp_off_r": c2.number_input("SP Offset R", value=0.0, key="lib_h_spr"),
-                               "weight": st.number_input("Weight (g)", step=0.1, key="lib_h_w")}
+                lib_p = {"hub": name, "fd_l": c1.number_input("FD Left", step=0.1), "fd_r": c2.number_input("FD Right", step=0.1), 
+                         "os_l": c1.number_input("Offset Left", step=0.1), "os_r": c2.number_input("Offset Right", step=0.1),
+                         "sp_off_l": c1.number_input("SP Offset L", value=0.0), "sp_off_r": c2.number_input("SP Offset R", value=0.0),
+                         "weight": st.number_input("Weight (g)", step=0.1)}
             elif cat in ["Spoke", "Nipple"]:
-                lib_payload = {cat.lower(): name, "weight": st.number_input("Unit Weight (g)", format="%.3f", step=0.001, key=f"lib_{cat.lower()}_w")}
+                lib_p = {cat.lower(): name, "weight": st.number_input("Unit Weight (g)", format="%.3f", step=0.001)}
             
             if st.form_submit_button("Save to Airtable"):
                 if not name: st.error("Name is required.")
                 else:
-                    base.table(f"{cat.lower()}s").create(lib_payload)
+                    base.table(f"{cat.lower()}s").create(lib_p)
                     st.cache_data.clear(); st.success(f"{name} added!"); st.rerun()
 
-    lib_choice = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view_choice")
+    lib_choice = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
     df_l = fetch_data(lib_choice, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
