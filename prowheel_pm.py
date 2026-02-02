@@ -100,20 +100,24 @@ with tabs[0]:
                 if row.get('f_rim'):
                     f_rim_data = get_comp_data(df_rims, row.get('f_rim'))
                     f_hub_data = get_comp_data(df_hubs, row.get('f_hub'))
-                    f_rim_weight = float(f_rim_data.get('weight', 0))
-                    f_hub_weight = float(f_hub_data.get('weight', 0))
-                    f_hole_count = int(f_rim_data.get('holes', 28))
-                    front_weight = f_rim_weight + f_hub_weight + (f_hole_count * (spoke_weight + nipple_weight))
-                    tw += front_weight
+                    # Only calculate if we actually got rim data back
+                    if f_rim_data:
+                        f_rim_weight = float(f_rim_data.get('weight', 0))
+                        f_hub_weight = float(f_hub_data.get('weight', 0))
+                        f_hole_count = int(f_rim_data.get('holes', 28))
+                        front_weight = f_rim_weight + f_hub_weight + (f_hole_count * (spoke_weight + nipple_weight))
+                        tw += front_weight
                 
                 if row.get('r_rim'):
                     r_rim_data = get_comp_data(df_rims, row.get('r_rim'))
                     r_hub_data = get_comp_data(df_hubs, row.get('r_hub'))
-                    r_rim_weight = float(r_rim_data.get('weight', 0))
-                    r_hub_weight = float(r_hub_data.get('weight', 0))
-                    r_hole_count = int(r_rim_data.get('holes', 28))
-                    rear_weight = r_rim_weight + r_hub_weight + (r_hole_count * (spoke_weight + nipple_weight))
-                    tw += rear_weight
+                    # Only calculate if we actually got rim data back
+                    if r_rim_data:
+                        r_rim_weight = float(r_rim_data.get('weight', 0))
+                        r_hub_weight = float(r_hub_data.get('weight', 0))
+                        r_hole_count = int(r_rim_data.get('holes', 28))
+                        rear_weight = r_rim_weight + r_hub_weight + (r_hole_count * (spoke_weight + nipple_weight))
+                        tw += rear_weight
                 
                 weight_display = f" | ⚖️ {int(tw)}g total"
             else:
