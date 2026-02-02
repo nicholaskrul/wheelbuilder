@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v15.0", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v15.1", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -97,22 +97,22 @@ with tabs[0]:
                 front_weight = 0.0
                 rear_weight = 0.0
                 
-                if row.get('f_rim'):
+                if row.get('f_rim') and str(row.get('f_rim')).lower() not in ['nan', '', 'none']:
                     f_rim_data = get_comp_data(df_rims, row.get('f_rim'))
                     f_hub_data = get_comp_data(df_hubs, row.get('f_hub'))
                     # Only calculate if we actually got rim data back
-                    if f_rim_data:
+                    if f_rim_data and f_rim_data.get('weight'):
                         f_rim_weight = float(f_rim_data.get('weight', 0))
                         f_hub_weight = float(f_hub_data.get('weight', 0))
                         f_hole_count = int(f_rim_data.get('holes', 28))
                         front_weight = f_rim_weight + f_hub_weight + (f_hole_count * (spoke_weight + nipple_weight))
                         tw += front_weight
                 
-                if row.get('r_rim'):
+                if row.get('r_rim') and str(row.get('r_rim')).lower() not in ['nan', '', 'none']:
                     r_rim_data = get_comp_data(df_rims, row.get('r_rim'))
                     r_hub_data = get_comp_data(df_hubs, row.get('r_hub'))
                     # Only calculate if we actually got rim data back
-                    if r_rim_data:
+                    if r_rim_data and r_rim_data.get('weight'):
                         r_rim_weight = float(r_rim_data.get('weight', 0))
                         r_hub_weight = float(r_hub_data.get('weight', 0))
                         r_hole_count = int(r_rim_data.get('holes', 28))
@@ -148,7 +148,7 @@ with tabs[0]:
                 
                 with c1:
                     st.markdown("**🔘 FRONT WHEEL**")
-                    if row.get('f_rim'):
+                    if row.get('f_rim') and str(row.get('f_rim')).lower() not in ['nan', '', 'none']:
                         st.write(f"**Rim:** {row.get('f_rim')}")
                         st.write(f"**Hub:** {row.get('f_hub')}")
                         st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
@@ -157,9 +157,10 @@ with tabs[0]:
                         st.info(f"📏 **Spoke Lengths**\nLeft: {row.get('f_l')} mm\nRight: {row.get('f_r')} mm")
                         
                         # Weight breakdown
-                        if row.get('f_rim'):
-                            f_rim_data = get_comp_data(df_rims, row.get('f_rim'))
-                            f_hub_data = get_comp_data(df_hubs, row.get('f_hub'))
+                        f_rim_data = get_comp_data(df_rims, row.get('f_rim'))
+                        f_hub_data = get_comp_data(df_hubs, row.get('f_hub'))
+                        # Only show weight breakdown if we have valid rim data
+                        if f_rim_data and f_rim_data.get('weight'):
                             f_rim_weight = float(f_rim_data.get('weight', 0))
                             f_hub_weight = float(f_hub_data.get('weight', 0))
                             f_hole_count = int(f_rim_data.get('holes', 28))
@@ -178,7 +179,7 @@ with tabs[0]:
                 
                 with c2:
                     st.markdown("**🔘 REAR WHEEL**")
-                    if row.get('r_rim'):
+                    if row.get('r_rim') and str(row.get('r_rim')).lower() not in ['nan', '', 'none']:
                         st.write(f"**Rim:** {row.get('r_rim')}")
                         st.write(f"**Hub:** {row.get('r_hub')}")
                         st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
@@ -187,9 +188,10 @@ with tabs[0]:
                         st.success(f"📏 **Spoke Lengths**\nLeft: {row.get('r_l')} mm\nRight: {row.get('r_r')} mm")
                         
                         # Weight breakdown
-                        if row.get('r_rim'):
-                            r_rim_data = get_comp_data(df_rims, row.get('r_rim'))
-                            r_hub_data = get_comp_data(df_hubs, row.get('r_hub'))
+                        r_rim_data = get_comp_data(df_rims, row.get('r_rim'))
+                        r_hub_data = get_comp_data(df_hubs, row.get('r_hub'))
+                        # Only show weight breakdown if we have valid rim data
+                        if r_rim_data and r_rim_data.get('weight'):
                             r_rim_weight = float(r_rim_data.get('weight', 0))
                             r_hub_weight = float(r_hub_data.get('weight', 0))
                             r_hole_count = int(r_rim_data.get('holes', 28))
