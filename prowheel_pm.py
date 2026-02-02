@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v13.9.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v14.0", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -68,8 +68,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v13.9.1")
-st.caption("Clean Library View | BOM Weights | Staging Logic")
+st.title("🚲 Wheelbuilder Lab v14.0")
+st.caption("Inventory Traceability | Serial Number Tracking")
 
 tabs = st.tabs(["📊 Dashboard", "🧮 Precision Calc", "➕ Register Build", "📄 Spec Sheet", "📦 Library"])
 
@@ -83,15 +83,41 @@ with tabs[0]:
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
                 c1, c2, c3 = st.columns(3)
-                if row.get('f_rim'):
-                    c1.write(f"**Front:** {row.get('f_rim')}\n{row.get('f_l')} / {row.get('f_r')} mm")
-                if row.get('r_rim'):
-                    c2.write(f"**Rear:** {row.get('r_rim')}\n{row.get('r_l')} / {row.get('r_r')} mm")
-                new_stat = c3.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", 
-                                        index=["Order Received", "Parts Received", "Building", "Complete"].index(row['status']) if row['status'] in ["Order Received", "Parts Received", "Building", "Complete"] else 0)
-                if new_stat != row['status']:
-                    base.table("builds").update(row['id'], {"status": new_stat})
-                    st.rerun()
+                
+                # Front Wheel View
+                with c1:
+                    if row.get('f_rim'):
+                        st.write(f"**Front:** {row.get('f_rim')}")
+                        st.caption(f"Ser: {row.get('f_rim_serial', '---')}")
+                    else: st.write("No Front Wheel")
+                
+                # Rear Wheel View
+                with c2:
+                    if row.get('r_rim'):
+                        st.write(f"**Rear:** {row.get('r_rim')}")
+                        st.caption(f"Ser: {row.get('r_rim_serial', '---')}")
+                    else: st.write("No Rear Wheel")
+                
+                # Status & Serial Updates
+                with c3:
+                    current_status = row.get('status', 'Order Received')
+                    status_options = ["Order Received", "Parts Received", "Building", "Complete"]
+                    new_stat = st.selectbox("Status", status_options, key=f"st_{row['id']}", 
+                                            index=status_options.index(current_status) if current_status in status_options else 0)
+                    
+                    if new_stat != current_status:
+                        base.table("builds").update(row['id'], {"status": new_stat})
+                        st.rerun()
+
+                    # Inline Serial Update Logic
+                    if current_status in ["Parts Received", "Building", "Complete"]:
+                        with st.popover("📝 Edit Serial Numbers"):
+                            new_f_ser = st.text_input("Front Rim Serial", value=row.get('f_rim_serial', ''), key=f"fser_{row['id']}")
+                            new_r_ser = st.text_input("Rear Rim Serial", value=row.get('r_rim_serial', ''), key=f"rser_{row['id']}")
+                            if st.button("Save Serials", key=f"btn_ser_{row['id']}"):
+                                base.table("builds").update(row['id'], {"f_rim_serial": new_f_ser, "r_rim_serial": new_r_ser})
+                                st.success("Updated!")
+                                st.rerun()
     else: st.info("Pipeline empty.")
 
 # --- TAB 2: CALCULATOR ---
@@ -134,28 +160,31 @@ with tabs[2]:
     df_spk = fetch_data("spokes", "spoke")
     df_nip = fetch_data("nipples", "nipple")
 
-    with st.form("build_registration_v13_9"):
+    with st.form("build_registration_v14_0"):
         customer = st.text_input("Customer Name")
-        inv_url = st.text_input("Invoice URL (e.g., Stripe, PayPal, or PDF Link)")
+        inv_url = st.text_input("Invoice URL")
         payload = {"customer": customer, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv_url}
         
         col_f, col_r = st.columns(2)
         if build_type in ["Full Wheelset", "Front Only"]:
             with col_f:
                 st.subheader("Front Wheel")
-                f_rim = st.text_input("Front Rim Name", value=st.session_state.build_stage['f_rim'])
-                f_hub = st.text_input("Front Hub Name", value=st.session_state.build_stage['f_hub'])
+                f_rim = st.text_input("Front Rim", value=st.session_state.build_stage['f_rim'])
+                f_hub = st.text_input("Front Hub", value=st.session_state.build_stage['f_hub'])
                 f_l = st.number_input("F L-Length", value=st.session_state.build_stage['f_l'])
                 f_r = st.number_input("F R-Length", value=st.session_state.build_stage['f_r'])
-                payload.update({"f_rim": f_rim, "f_hub": f_hub, "f_l": f_l, "f_r": f_r})
+                f_ser = st.text_input("Front Rim Serial (Optional)")
+                payload.update({"f_rim": f_rim, "f_hub": f_hub, "f_l": f_l, "f_r": f_r, "f_rim_serial": f_ser})
+        
         if build_type in ["Full Wheelset", "Rear Only"]:
             with col_r:
                 st.subheader("Rear Wheel")
-                r_rim = st.text_input("Rear Rim Name", value=st.session_state.build_stage['r_rim'])
-                r_hub = st.text_input("Rear Hub Name", value=st.session_state.build_stage['r_hub'])
+                r_rim = st.text_input("Rear Rim", value=st.session_state.build_stage['r_rim'])
+                r_hub = st.text_input("Rear Hub", value=st.session_state.build_stage['r_hub'])
                 r_l = st.number_input("R L-Length", value=st.session_state.build_stage['r_l'])
                 r_r = st.number_input("R R-Length", value=st.session_state.build_stage['r_r'])
-                payload.update({"r_rim": r_rim, "r_hub": r_hub, "r_l": r_l, "r_r": r_r})
+                r_ser = st.text_input("Rear Rim Serial (Optional)")
+                payload.update({"r_rim": r_rim, "r_hub": r_hub, "r_l": r_l, "r_r": r_r, "r_rim_serial": r_ser})
         
         st.divider()
         sc1, sc2 = st.columns(2)
@@ -205,7 +234,8 @@ with tabs[3]:
                 total_wheelset_weight += front_total
                 st.write(f"**Rim:** {b.get('f_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('f_hub')} ({hub_w}g)")
-                st.write(f"**Lengths:** L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
+                st.write(f"**Serial:** `{b.get('f_rim_serial', 'N/A')}`")
+                st.info(f"📏 L: {b.get('f_l')}mm / R: {b.get('f_r')}mm")
             else: st.write("N/A")
                 
         with col2:
@@ -219,7 +249,8 @@ with tabs[3]:
                 total_wheelset_weight += rear_total
                 st.write(f"**Rim:** {b.get('r_rim')} ({rim_w}g)")
                 st.write(f"**Hub:** {b.get('r_hub')} ({hub_w}g)")
-                st.write(f"**Lengths:** L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
+                st.write(f"**Serial:** `{b.get('r_rim_serial', 'N/A')}`")
+                st.success(f"📏 L: {b.get('r_l')}mm / R: {b.get('r_r')}mm")
             else: st.write("N/A")
 
         st.divider()
@@ -231,7 +262,5 @@ with tabs[4]:
     choice = st.radio("View Library:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
     df_lib = fetch_data(choice, "id")
     if not df_lib.empty:
-        # HIDE UNWANTED COLUMNS IN THE VIEW ONLY
         view_df = df_lib.drop(columns=['id', 'label'], errors='ignore')
         st.dataframe(view_df, use_container_width=True)
-
