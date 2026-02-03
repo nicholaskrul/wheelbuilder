@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v15.6", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v15.7", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,14 +66,22 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v15.6")
-st.caption("Integrated Workshop Suite | Precision Engineering & Logistics")
+st.title("🚲 Wheelbuilder Lab v15.7")
+st.caption("Integrated Workshop Suite | Global Data Sync")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "➕ Register Build", "📦 Library"])
 
 # --- TAB 1: UNIFIED WORKSHOP ---
 with tabs[0]:
-    st.subheader("🏁 Workshop Pipeline")
+    # --- HEADER & GLOBAL SYNC ---
+    c_sync1, c_sync2 = st.columns([5, 1])
+    with c_sync1:
+        st.subheader("🏁 Workshop Pipeline")
+    with c_sync2:
+        if st.button("🔄 Sync Data", use_container_width=True, help="Force pull updated data from Airtable"):
+            st.cache_data.clear()
+            st.toast("Workshop data synchronized!", icon="✅")
+            st.rerun()
     
     # Bootstrap data
     df_builds = fetch_data("builds", "customer")
@@ -212,7 +220,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("📝 Register New Build")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v15_6"):
+    with st.form("reg_form_v15_7"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -250,7 +258,7 @@ with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component", expanded=False):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v15_6"):
+        with st.form("lib_add_v15_7"):
             name = st.text_input("Component Name", key="lib_n")
             c1, c2 = st.columns(2)
             lib_p = {}
@@ -265,7 +273,7 @@ with tabs[3]:
             if st.form_submit_button("Save to Library"):
                 if name:
                     base.table(f"{cat.lower()}s").create(lib_p)
-                    st.cache_data.clear(); st.success("Added!"); st.rerun()
+                    st.cache_data.clear(); st.success(f"{name} added!"); st.rerun()
                 else: st.error("Name required.")
 
     view_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
