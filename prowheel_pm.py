@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v15.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v15.5", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v15.4")
-st.caption("Live Workshop Management | Editable Build Journals")
+st.title("🚲 Wheelbuilder Lab v15.5")
+st.caption("Live Workshop Management | Granular Weight Breakdown")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "➕ Register Build", "📦 Library"])
 
@@ -141,6 +141,7 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Breakdown")
                             st.write(f"Rim: {int(f_calc['rim_w'])}g | Hub: {int(f_calc['hub_w'])}g")
+                            st.write(f"Spokes: {int(f_calc['spoke_total'])}g | Nipples: {int(f_calc['nipple_total'])}g")
                             st.metric("Front Mass", f"{int(f_calc['total'])}g")
                     else: st.write("N/A")
 
@@ -154,6 +155,7 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Breakdown")
                             st.write(f"Rim: {int(r_calc['rim_w'])}g | Hub: {int(r_calc['hub_w'])}g")
+                            st.write(f"Spokes: {int(r_calc['spoke_total'])}g | Nipples: {int(r_calc['nipple_total'])}g")
                             st.metric("Rear Mass", f"{int(r_calc['total'])}g")
                     else: st.write("N/A")
 
