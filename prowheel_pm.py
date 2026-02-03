@@ -119,18 +119,13 @@ with tabs[0]:
                     r_calc["total"] = r_calc["rim_w"] + r_calc["hub_w"] + r_calc["spoke_total"] + r_calc["nipple_total"]
 
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', '---')})"):
-                t_col1, t_col2 = st.columns([3, 1])
-                with t_col1:
-                    current_status = row.get('status', 'Order Received')
-                    new_stat = st.selectbox("Update Status", ["Order Received", "Parts Received", "Building", "Complete"], 
-                                            key=f"st_{row['id']}", 
-                                            index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
-                    if new_stat != current_status:
-                        base.table("builds").update(row['id'], {"status": new_stat})
-                        st.rerun()
-                with t_col2:
-                    if row.get('invoice_url'):
-                        st.link_button("📄 Invoice", row['invoice_url'], use_container_width=True)
+                current_status = row.get('status', 'Order Received')
+                new_stat = st.selectbox("Update Status", ["Order Received", "Parts Received", "Building", "Complete"], 
+                                        key=f"st_{row['id']}", 
+                                        index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
+                if new_stat != current_status:
+                    base.table("builds").update(row['id'], {"status": new_stat})
+                    st.rerun()
                 
                 st.divider()
                 c1, c2, c3 = st.columns(3)
@@ -170,6 +165,8 @@ with tabs[0]:
                     st.divider()
                     st.metric("📦 WHEELSET TOTAL", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
+                    if row.get('invoice_url'):
+                        st.link_button("📄 Invoice", row['invoice_url'], use_container_width=True)
 
                     # Popover for Data Entry (Serials and Notes)
                     with st.popover("📝 Edit Build Details"):
