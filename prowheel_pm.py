@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.2", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v16.3", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.2")
-st.caption("Workshop Command Center | Stable Manual Archiving")
+st.title("🚲 Wheelbuilder Lab v16.3")
+st.caption("Workshop Command Center | Robust Fingerprint Archiving")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -165,14 +165,20 @@ with tabs[1]:
         save_to_db = st.checkbox("💾 Save to Proven Recipe Archive", value=True, key="save_recipe")
         
         if st.button("💾 Stage & Save Data", key="calc_stage_btn", use_container_width=True):
+            # Stage locally
             if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
             else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
             
+            # Archive Logic
             if save_to_db:
                 db_table = base.table("spoke_db")
-                # Corrected Formula logic for Airtable API
-                sp_val = 'TRUE' if is_sp else 'FALSE'
-                search_f = f"AND({{rim}}='{r_sel}', {{hub}}='{h_sel}', {{holes}}={holes}, {{crosses}}={cross}, {{is_sp}}={sp_val})"
+                # Build the Fingerprint string to match Airtable's formula column
+                sp_type = "(SP)" if is_sp else "(JB)"
+                fingerprint = f"{r_sel} | {h_sel} | {holes}h | {cross}x {sp_type}"
+                
+                # Escape single quotes for the search formula
+                escaped_fp = fingerprint.replace("'", "\\'")
+                search_f = f"{{combo_id}}='{escaped_fp}'"
                 
                 try:
                     existing = db_table.all(formula=search_f)
@@ -180,7 +186,16 @@ with tabs[1]:
                         count = existing[0]['fields'].get('build_count', 1)
                         db_table.update(existing[0]['id'], {"build_count": count + 1, "len_l": l_len, "len_r": r_len})
                     else:
-                        db_table.create({"rim": [rd['id']], "hub": [hd['id']], "holes": holes, "crosses": cross, "is_sp": is_sp, "len_l": l_len, "len_r": r_len, "build_count": 1})
+                        db_table.create({
+                            "rim": [rd['id']], 
+                            "hub": [hd['id']], 
+                            "holes": holes, 
+                            "crosses": cross, 
+                            "is_sp": is_sp, 
+                            "len_l": l_len, 
+                            "len_r": r_len, 
+                            "build_count": 1
+                        })
                     st.toast("Recipe archived!")
                 except Exception as e:
                     st.error(f"Sync error: {e}")
@@ -202,7 +217,7 @@ with tabs[2]:
 with tabs[3]:
     st.header("📝 Register New Build")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v16_2"):
+    with st.form("reg_form_v16_3"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -237,7 +252,7 @@ with tabs[4]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v16_2"):
+        with st.form("lib_add_v16_3"):
             name = st.text_input("Component Name", key="lib_n")
             c1, c2 = st.columns(2)
             lib_p = {}
