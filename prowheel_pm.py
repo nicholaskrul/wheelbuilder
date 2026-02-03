@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v15.8", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v15.9", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -31,11 +31,11 @@ def fetch_data(table_name, label_col):
                 fields['label'] = str(fields[label_col]).strip()
             data.append(fields)
         df = pd.DataFrame(data)
-        # Handle linked record lists by taking the first element
+        # Flatten list fields (like linked records) to strings for display/logic
         for col in df.columns:
             df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
         return df
-    except:
+    except Exception:
         return pd.DataFrame()
 
 # --- 3. ANALYTICS HELPERS ---
@@ -59,7 +59,7 @@ def calculate_spoke(erd, fd, os, holes, crosses, is_sp=False, sp_off=0.0):
         length = math.sqrt(max(0, base_l_sq + float(os)**2)) + float(sp_off)
         return round(length, 1)
 
-# --- 4. SESSION STATE INITIALIZATION ---
+# --- 4. SESSION STATE ---
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
         'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0,
@@ -67,18 +67,18 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v15.8")
-st.caption("Integrated Workshop Suite | Archive & Recipe Intelligence")
+st.title("🚲 Wheelbuilder Lab v15.9")
+st.caption("Live Workshop Management | Spoke Recipe Archive Active")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
-# --- TAB 1: WORKSHOP ---
+# --- TAB 1: WORKSHOP (Dashboard) ---
 with tabs[0]:
     c_sync1, c_sync2 = st.columns([5, 1])
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
     with c_sync2:
-        if st.button("🔄 Sync Data", use_container_width=True):
-            st.cache_data.clear(); st.toast("Synced!"); st.rerun()
+        if st.button("🔄 Sync Data", key="global_sync", use_container_width=True):
+            st.cache_data.clear(); st.toast("Synced with Airtable!"); st.rerun()
     
     df_builds = fetch_data("builds", "customer")
     df_rims = fetch_data("rims", "rim")
@@ -128,7 +128,7 @@ with tabs[0]:
                             st.caption("Weight Anatomy")
                             st.write(f"R: {int(f_calc['rim_w'])}g | H: {int(f_calc['hub_w'])}g")
                             st.write(f"S: {int(f_calc['spk_t'])}g | N: {int(f_calc['nip_t'])}g")
-                            st.metric("Total", f"{int(f_calc['total'])}g")
+                            st.metric("Wheel Total", f"{int(f_calc['total'])}g")
                     else: st.write("N/A")
                 with c2:
                     st.markdown("**🔘 REAR**")
@@ -139,7 +139,7 @@ with tabs[0]:
                             st.caption("Weight Anatomy")
                             st.write(f"R: {int(r_calc['rim_w'])}g | H: {int(r_calc['hub_w'])}g")
                             st.write(f"S: {int(r_calc['spk_t'])}g | N: {int(r_calc['nip_t'])}g")
-                            st.metric("Total", f"{int(r_calc['total'])}g")
+                            st.metric("Wheel Total", f"{int(r_calc['total'])}g")
                     else: st.write("N/A")
                 with c3:
                     st.metric("📦 SET WEIGHT", f"{int(f_calc['total'] + r_calc['total'])}g")
@@ -157,14 +157,14 @@ with tabs[1]:
     st.header("🧮 Spoke Length Engine")
     if not df_rims.empty and not df_hubs.empty:
         cr, ch = st.columns(2)
-        r_sel = cr.selectbox("Select Rim", df_rims['label'], key="calc_r")
-        h_sel = ch.selectbox("Select Hub", df_hubs['label'], key="calc_h")
+        r_sel = cr.selectbox("Select Rim", df_rims['label'], key="calc_r_sel")
+        h_sel = ch.selectbox("Select Hub", df_hubs['label'], key="calc_h_sel")
         rd, hd = get_comp_data(df_rims, r_sel), get_comp_data(df_hubs, h_sel)
         st.divider()
         col1, col2, col3 = st.columns(3)
-        is_sp = col1.toggle("Straightpull?", value=True, key="calc_sp")
-        holes = col2.number_input("Hole Count", value=int(rd.get('holes', 28)), key="calc_holes")
-        cross = col3.selectbox("Crosses", [0,1,2,3,4], index=3, key="calc_cross")
+        is_sp = col1.toggle("Straightpull?", value=True, key="calc_is_sp")
+        holes = col2.number_input("Hole Count", value=int(rd.get('holes', 28)), key="calc_h_count")
+        cross = col3.selectbox("Crosses", [0,1,2,3,4], index=3, key="calc_x_count")
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
@@ -194,14 +194,17 @@ with tabs[2]:
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
-        st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Build Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
-    else: st.info("Recipe Archive is currently empty.")
+        # Filter down to the specific columns confirmed in your Airtable
+        cols_to_show = ['label', 'len_l', 'len_r', 'build_count']
+        existing_cols = [c for c in cols_to_show if c in df_recipes.columns]
+        st.dataframe(df_recipes[existing_cols].rename(columns={'label': 'Build Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Verified Hits'}), use_container_width=True, hide_index=True)
+    else: st.info("Recipe Archive is currently empty. Save a calculation from the Calculator tab.")
 
 # --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
     st.header("📝 Register New Build")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v15_8"):
+    with st.form("reg_form_v15_9"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -238,7 +241,7 @@ with tabs[4]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v15_8"):
+        with st.form("lib_add_v15_9"):
             name = st.text_input("Component Name", key="lib_n")
             c1, c2 = st.columns(2)
             lib_p = {}
@@ -255,6 +258,6 @@ with tabs[4]:
                     base.table(f"{cat.lower()}s").create(lib_p)
                     st.cache_data.clear(); st.success("Added!"); st.rerun()
                 else: st.error("Name required.")
-    v_cat = st.radio("Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
+    v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
