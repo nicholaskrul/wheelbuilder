@@ -162,25 +162,36 @@ with tabs[1]:
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
         target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
         save_to_db = st.checkbox("💾 Save to Proven Recipe Archive", value=True, key="save_recipe")
+        
         if st.button("💾 Stage & Save Data", key="calc_stage_btn", use_container_width=True):
             if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
             else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
+            
             if save_to_db:
                 db_table = base.table("spoke_db")
-                existing = db_table.all(formula=f"AND({{rim}}='{r_sel}', {{hub}}='{h_sel}', {{holes}}={holes}, {{crosses}}={cross}, {{is_sp}}={'TRUE' if is_sp else 'FALSE'})")
-                if existing:
-                    count = existing[0]['fields'].get('build_count', 1)
-                    db_table.update(existing[0]['id'], {"build_count": count + 1, "len_l": l_len, "len_r": r_len})
-                else:
-                    db_table.create({"rim": [rd['id']], "hub": [hd['id']], "holes": holes, "crosses": cross, "is_sp": is_sp, "len_l": l_len, "len_r": r_len, "build_count": 1})
-                st.toast("Recipe archived!")
+                # Fix: Checkbox boolean mapped to 1/0 for Airtable formula string
+                search_formula = f"AND({{rim}}='{r_sel}', {{hub}}='{h_sel}', {{holes}}={holes}, {{crosses}}={cross}, {{is_sp}}={'1' if is_sp else '0'})"
+                
+                try:
+                    existing = db_table.all(formula=search_formula)
+                    if existing:
+                        count = existing[0]['fields'].get('build_count', 1)
+                        db_table.update(existing[0]['id'], {"build_count": count + 1, "len_l": l_len, "len_r": r_len})
+                    else:
+                        db_table.create({
+                            "rim": [rd['id']], "hub": [hd['id']], "holes": holes, 
+                            "crosses": cross, "is_sp": is_sp, "len_l": l_len, 
+                            "len_r": r_len, "build_count": 1
+                        })
+                    st.toast("Recipe archived!")
+                except Exception as e:
+                    st.error(f"Sync error: {e}")
             st.success(f"Staged {target}!")
 
 # --- TAB 3: PROVEN RECIPES ---
 with tabs[2]:
     st.header("📜 Proven Recipe Archive")
     df_recipes = fetch_data("spoke_db", "combo_id")
-
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
@@ -188,7 +199,7 @@ with tabs[2]:
         existing_cols = [c for c in cols if c in df_recipes.columns]
         st.dataframe(df_recipes[existing_cols].rename(columns={'label': 'Build Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
     else: 
-        st.info("Recipe Archive is empty. Manually add recipes in Airtable or use the 'Save to Archive' check in the Calculator.")
+        st.info("Recipe Archive is empty. Manually add recipes in Airtable or use the 'Save to Archive' checkbox in the Calculator.")
 
 # --- TAB 4 & 5 (Registration & Library) ---
 with tabs[3]:
