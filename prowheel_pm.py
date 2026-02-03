@@ -164,7 +164,7 @@ with tabs[0]:
                     else: st.write("N/A")
 
                 with c3:
-                    st.markdown("**⚙️ LOGISTICS & TOTALS**")
+                    st.markdown("**⚙️ SPOKES & NIPPLES**")
                     if f_calc["exists"] and r_calc["exists"]:
                         st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
                         st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
@@ -294,3 +294,4 @@ with tabs[3]:
     view_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(view_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
+
