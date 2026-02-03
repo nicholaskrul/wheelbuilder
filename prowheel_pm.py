@@ -140,6 +140,8 @@ with tabs[0]:
                     if f_calc["exists"]:
                         st.write(f"**Rim:** {row.get('f_rim')}")
                         st.write(f"**Hub:** {row.get('f_hub')}")
+                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('f_rim_serial', 'NONE')}`")
                         st.info(f"📏 **Lengths**\nL: {row.get('f_l')}mm / R: {row.get('f_r')}mm")
                         with st.container(border=True):
@@ -153,8 +155,10 @@ with tabs[0]:
                     if r_calc["exists"]:
                         st.write(f"**Rim:** {row.get('r_rim')}")
                         st.write(f"**Hub:** {row.get('r_hub')}")
+                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('r_rim_serial', 'NONE')}`")
-                        st.success(f"📏 **Lengths**\nL: {row.get('r_l')}mm / R: {row.get('r_r')}mm")
+                        st.info(f"📏 **Lengths**\nL: {row.get('r_l')}mm / R: {row.get('r_r')}mm")
                         with st.container(border=True):
                             st.caption("Weight Breakdown")
                             st.write(f"Rim: {int(r_calc['rim_w'])}g | Hub: {int(r_calc['hub_w'])}g")
@@ -163,8 +167,6 @@ with tabs[0]:
 
                 with c3:
                     st.markdown("**⚙️ LOGISTICS & TOTALS**")
-                    st.write(f"**Spoke:** {row.get('spoke')}")
-                    st.write(f"**Nipple:** {row.get('nipple')}")
                     st.divider()
                     st.metric("📦 WHEELSET TOTAL", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
