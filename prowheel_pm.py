@@ -136,9 +136,6 @@ with tabs[0]:
                     if f_calc["exists"]:
                         st.write(f"**Rim:** {row.get('f_rim')}")
                         st.write(f"**Hub:** {row.get('f_hub')}")
-                        if not r_calc["exists"]:
-                            st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
-                            st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('f_rim_serial', 'NONE')}`")
                         st.info(f"📏 **Lengths**\nL: {row.get('f_l')}mm / R: {row.get('f_r')}mm")
                         with st.container(border=True):
@@ -152,9 +149,6 @@ with tabs[0]:
                     if r_calc["exists"]:
                         st.write(f"**Rim:** {row.get('r_rim')}")
                         st.write(f"**Hub:** {row.get('r_hub')}")
-                        if not f_calc["exists"]:
-                            st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
-                            st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('r_rim_serial', 'NONE')}`")
                         st.info(f"📏 **Lengths**\nL: {row.get('r_l')}mm / R: {row.get('r_r')}mm")
                         with st.container(border=True):
@@ -165,9 +159,8 @@ with tabs[0]:
 
                 with c3:
                     st.markdown("**⚙️ SPOKES & NIPPLES**")
-                    if f_calc["exists"] and r_calc["exists"]:
-                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
-                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
+                    st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                    st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                     st.divider()
                     st.metric("📦 WHEELSET TOTAL WEIGHT", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
@@ -294,5 +287,3 @@ with tabs[3]:
     view_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(view_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
-
-
