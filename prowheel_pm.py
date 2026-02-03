@@ -251,7 +251,7 @@ with tabs[3]:
             with cr:
                 st.subheader("Rear")
                 rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-                rh = st.text_input("Hub", value=st.session_state.build_state.build_stage['r_hub'], key="reg_rh")
+                rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
                 rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
                 payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
         sc1, sc2 = st.columns(2)
@@ -279,3 +279,4 @@ with tabs[4]:
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
+
