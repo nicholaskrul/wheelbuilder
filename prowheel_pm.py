@@ -31,7 +31,6 @@ def fetch_data(table_name, label_col):
                 fields['label'] = str(fields[label_col]).strip()
             data.append(fields)
         df = pd.DataFrame(data)
-        # Flatten list fields (like linked records) to strings for display/logic
         for col in df.columns:
             df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
         return df
@@ -68,11 +67,11 @@ if 'build_stage' not in st.session_state:
 
 # --- 5. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v16.0")
-st.caption("Integrated Workshop Suite | Archive Migration Logic Active")
+st.caption("Workshop Command Center | Data Migration Logic Enabled")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
-# --- TAB 1: WORKSHOP (Dashboard) ---
+# --- TAB 1: WORKSHOP ---
 with tabs[0]:
     c_sync1, c_sync2 = st.columns([5, 1])
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
@@ -89,11 +88,9 @@ with tabs[0]:
     if not df_builds.empty:
         search = st.text_input("🔍 Search Customer", key="main_search")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False, na=False)] if search else df_builds
-        
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
             s_data, n_data = get_comp_data(df_spokes, row.get('spoke')), get_comp_data(df_nipples, row.get('nipple'))
             sw, nw = float(s_data.get('weight', 0)), float(n_data.get('weight', 0))
-            
             f_calc = {"total": 0.0, "exists": False, "rim_w": 0.0, "hub_w": 0.0, "spk_t": 0.0, "nip_t": 0.0}
             if row.get('f_rim'):
                 frd, fhd = get_comp_data(df_rims, row.get('f_rim')), get_comp_data(df_hubs, row.get('f_hub'))
@@ -101,7 +98,6 @@ with tabs[0]:
                     f_calc.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0)), "holes": int(frd.get('holes', 0))})
                     f_calc["spk_t"], f_calc["nip_t"] = f_calc["holes"] * sw, f_calc["holes"] * nw
                     f_calc["total"] = f_calc["rim_w"] + f_calc["hub_w"] + f_calc["spk_t"] + f_calc["nip_t"]
-
             r_calc = {"total": 0.0, "exists": False, "rim_w": 0.0, "hub_w": 0.0, "spk_t": 0.0, "nip_t": 0.0}
             if row.get('r_rim'):
                 rrd, rhd = get_comp_data(df_rims, row.get('r_rim')), get_comp_data(df_hubs, row.get('r_hub'))
@@ -115,7 +111,6 @@ with tabs[0]:
                 new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", index=["Order Received", "Parts Received", "Building", "Complete"].index(cur_stat))
                 if new_stat != cur_stat:
                     base.table("builds").update(row['id'], {"status": new_stat}); st.cache_data.clear(); st.rerun()
-                
                 st.divider()
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -126,8 +121,7 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Anatomy")
                             st.write(f"R: {int(f_calc['rim_w'])}g | H: {int(f_calc['hub_w'])}g")
-                            st.write(f"S: {int(f_calc['spk_t'])}g | N: {int(f_calc['nip_t'])}g")
-                            st.metric("Total", f"{int(f_calc['total'])}g")
+                            st.metric("Wheel Total", f"{int(f_calc['total'])}g")
                     else: st.write("N/A")
                 with c2:
                     st.markdown("**🔘 REAR**")
@@ -137,8 +131,7 @@ with tabs[0]:
                         with st.container(border=True):
                             st.caption("Weight Anatomy")
                             st.write(f"R: {int(r_calc['rim_w'])}g | H: {int(r_calc['hub_w'])}g")
-                            st.write(f"S: {int(r_calc['spk_t'])}g | N: {int(r_calc['nip_t'])}g")
-                            st.metric("Total", f"{int(r_calc['total'])}g")
+                            st.metric("Wheel Total", f"{int(r_calc['total'])}g")
                     else: st.write("N/A")
                 with c3:
                     st.metric("📦 SET WEIGHT", f"{int(f_calc['total'] + r_calc['total'])}g")
@@ -167,14 +160,11 @@ with tabs[1]:
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         st.metric("Left Spoke", f"{l_len} mm"); st.metric("Right Spoke", f"{r_len} mm")
-        
         target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
         save_to_db = st.checkbox("💾 Save to Proven Recipe Archive", value=True, key="save_recipe")
-        
         if st.button("💾 Stage & Save Data", key="calc_stage_btn", use_container_width=True):
             if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
             else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
-            
             if save_to_db:
                 db_table = base.table("spoke_db")
                 existing = db_table.all(formula=f"AND({{rim}}='{r_sel}', {{hub}}='{h_sel}', {{holes}}={holes}, {{crosses}}={cross}, {{is_sp}}={'TRUE' if is_sp else 'FALSE'})")
@@ -186,43 +176,62 @@ with tabs[1]:
                 st.toast("Recipe archived!")
             st.success(f"Staged {target}!")
 
-# --- TAB 3: PROVEN RECIPES (Archive & Migration) ---
+# --- TAB 3: PROVEN RECIPES (Archive & Migration Tool) ---
 with tabs[2]:
     st.header("📜 Proven Recipe Archive")
     df_recipes = fetch_data("spoke_db", "combo_id")
-
+    
+    # Hidden Migration Tool
     with st.expander("🛠️ Archive Maintenance"):
-        st.write("Extract unique component recipes from existing build history.")
+        st.write("Scan existing build history to populate this database automatically.")
         if st.button("🚀 Seed Archive from Build History"):
-            with st.status("Analyzing history...", expanded=True) as status:
+            with st.status("Analyzing build history...", expanded=True) as status:
                 all_builds = base.table("builds").all()
                 db_table = base.table("spoke_db")
-                new_entries = 0
+                new_recipes = 0
+                
+                # Logic to extract unique recipes from history
                 for b in all_builds:
                     f = b['fields']
+                    # Process both Front and Rear if they exist
                     wheels = []
                     if f.get('f_rim'): wheels.append(('f_rim', 'f_hub', 'f_l', 'f_r'))
                     if f.get('r_rim'): wheels.append(('r_rim', 'r_hub', 'r_l', 'r_r'))
-                    for rk, hk, lk, rk2 in wheels:
-                        rn, hn, lv, rv = f.get(rk), f.get(hk), f.get(lk), f.get(rk2)
-                        rd_m, hd_m = get_comp_data(df_rims, rn), get_comp_data(df_hubs, hn)
-                        if rd_m and hd_m:
-                            formula = f"AND({{rim}}='{rn}', {{hub}}='{hn}', {{len_l}}={lv})"
-                            if not db_table.all(formula=formula):
-                                db_table.create({"rim": [rd_m['id']], "hub": [hd_m['id']], "len_l": float(lv), "len_r": float(rv), "holes": int(rd_m.get('holes', 28)), "crosses": 3, "build_count": 1})
-                                new_entries += 1
-                status.update(label=f"Migration Complete! Added {new_entries} recipes.", state="complete")
+                    
+                    for rim_key, hub_key, l_key, r_key in wheels:
+                        r_name, h_name = f.get(rim_key), f.get(hub_key)
+                        l_val, r_val = f.get(l_key), f.get(r_key)
+                        
+                        # Find original IDs from library to ensure links don't break
+                        rd_match = get_comp_data(df_rims, r_name)
+                        hd_match = get_comp_data(df_hubs, h_name)
+                        
+                        if rd_match and hd_match:
+                            # We assume JB for history unless marked. For migration, 
+                            # we search by name and lengths
+                            formula = f"AND({{rim}}='{r_name}', {{hub}}='{h_name}', {{len_l}}={l_val})"
+                            existing = db_table.all(formula=formula)
+                            
+                            if not existing:
+                                db_table.create({
+                                    "rim": [rd_match['id']], "hub": [hd_match['id']], 
+                                    "len_l": float(l_val), "len_r": float(r_val),
+                                    "holes": int(rd_match.get('holes', 28)), "crosses": 3, # Defaulting 3x for migration
+                                    "build_count": 1
+                                })
+                                new_recipes += 1
+                status.update(label=f"Migration Complete! Added {new_recipes} new recipes.", state="complete")
                 st.cache_data.clear(); st.rerun()
 
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
-        cols_to_show = ['label', 'len_l', 'len_r', 'build_count']
-        existing_cols = [c for c in cols_to_show if c in df_recipes.columns]
+        cols = ['label', 'len_l', 'len_r', 'build_count']
+        existing_cols = [c for c in cols if c in df_recipes.columns]
         st.dataframe(df_recipes[existing_cols].rename(columns={'label': 'Build Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
-    else: st.info("Recipe Archive is empty.")
+    else: st.info("Recipe Archive is empty. Use the Maintenance tool above to import history.")
 
-# --- TAB 4: REGISTER BUILD ---
+# --- TAB 4 & 5 (Registration & Library) ---
 with tabs[3]:
     st.header("📝 Register New Build")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
@@ -242,7 +251,7 @@ with tabs[3]:
             with cr:
                 st.subheader("Rear")
                 rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-                rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
+                rh = st.text_input("Hub", value=st.session_state.build_state.build_stage['r_hub'], key="reg_rh")
                 rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
                 payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
         sc1, sc2 = st.columns(2)
@@ -250,33 +259,23 @@ with tabs[3]:
                         "nipple": sc2.selectbox("Nipple", df_nipples['label'] if not df_nipples.empty else ["Std"], key="reg_nip"),
                         "notes": st.text_area("Build Notes", key="reg_nt")})
         if st.form_submit_button("🚀 Finalize Build"):
-            if cust:
-                base.table("builds").create(payload)
-                st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
-                st.cache_data.clear(); st.success("Registered!"); st.rerun()
+            if cust: base.table("builds").create(payload); st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}; st.cache_data.clear(); st.success("Registered!"); st.rerun()
             else: st.error("Customer name is required.")
 
-# --- TAB 5: LIBRARY ---
 with tabs[4]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
         with st.form("lib_add_v16_0"):
-            name = st.text_input("Component Name", key="lib_n")
+            name = st.text_input("Component Name")
             c1, c2 = st.columns(2)
             lib_p = {}
-            if cat == "Rim":
-                lib_p = {"rim": name, "erd": c1.number_input("ERD (mm)", step=0.1), "holes": c2.number_input("Hole Count", step=1, value=28), "weight": st.number_input("Weight (g)", step=0.1)}
-            elif cat == "Hub":
-                lib_p = {"hub": name, "fd_l": c1.number_input("FD Left", step=0.1), "fd_r": c2.number_input("FD Right", step=0.1), 
-                        "os_l": c1.number_input("Offset L", step=0.1), "os_r": c2.number_input("Offset R", step=0.1),
-                        "sp_off_l": c1.number_input("SP Offset L", value=0.0), "sp_off_r": c2.number_input("SP Offset R", value=0.0), "weight": st.number_input("Weight (g)", step=0.1)}
-            elif cat in ["Spoke", "Nipple"]:
-                lib_p = {cat.lower(): name, "weight": st.number_input("Unit Weight (g)", format="%.3f", step=0.001)}
+            if cat == "Rim": lib_p = {"rim": name, "erd": c1.number_input("ERD (mm)", step=0.1), "holes": c2.number_input("Hole Count", step=1, value=28), "weight": st.number_input("Weight (g)", step=0.1)}
+            elif cat == "Hub": lib_p = {"hub": name, "fd_l": c1.number_input("FD Left", step=0.1), "fd_r": c2.number_input("FD Right", step=0.1), "os_l": c1.number_input("Offset L", step=0.1), "os_r": c2.number_input("Offset R", step=0.1), "sp_off_l": c1.number_input("SP Offset L", value=0.0), "sp_off_r": c2.number_input("SP Offset R", value=0.0), "weight": st.number_input("Weight (g)", step=0.1)}
+            elif cat in ["Spoke", "Nipple"]: lib_p = {cat.lower(): name, "weight": st.number_input("Unit Weight (g)", format="%.3f", step=0.001)}
             if st.form_submit_button("Save to Library"):
-                if name:
-                    base.table(f"{cat.lower()}s").create(lib_p)
-                    st.cache_data.clear(); st.success("Added!"); st.rerun()
+                if name: base.table(f"{cat.lower()}s").create(lib_p); st.cache_data.clear(); st.success("Added!"); st.rerun()
+                else: st.error("Name required.")
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
