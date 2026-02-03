@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v14.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v15.4", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -99,7 +99,7 @@ with tabs[0]:
                 if fr_d:
                     f_calc.update({
                         "exists": True, "rim_w": float(fr_d.get('weight', 0)),
-                        "hub_w": float(fh_d.get('weight', 0)), "holes": int(fr_d.get('holes', 28))
+                        "hub_w": float(fh_d.get('weight', 0)), "holes": int(fr_d.get('holes', 0))
                     })
                     f_calc["spoke_total"] = f_calc["holes"] * sw
                     f_calc["nipple_total"] = f_calc["holes"] * nw
@@ -112,7 +112,7 @@ with tabs[0]:
                 if rr_d:
                     r_calc.update({
                         "exists": True, "rim_w": float(rr_d.get('weight', 0)),
-                        "hub_w": float(rh_d.get('weight', 0)), "holes": int(rr_d.get('holes', 28))
+                        "hub_w": float(rh_d.get('weight', 0)), "holes": int(rr_d.get('holes', 0))
                     })
                     r_calc["spoke_total"] = r_calc["holes"] * sw
                     r_calc["nipple_total"] = r_calc["holes"] * nw
@@ -125,6 +125,7 @@ with tabs[0]:
                                         index=["Order Received", "Parts Received", "Building", "Complete"].index(current_status))
                 if new_stat != current_status:
                     base.table("builds").update(row['id'], {"status": new_stat})
+                    st.cache_data.clear()
                     st.rerun()
                 
                 st.divider()
@@ -135,8 +136,9 @@ with tabs[0]:
                     if f_calc["exists"]:
                         st.write(f"**Rim:** {row.get('f_rim')}")
                         st.write(f"**Hub:** {row.get('f_hub')}")
-                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
-                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
+                        if not r_calc["exists"]:
+                            st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                            st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('f_rim_serial', 'NONE')}`")
                         st.info(f"📏 **Lengths**\nL: {row.get('f_l')}mm / R: {row.get('f_r')}mm")
                         with st.container(border=True):
@@ -150,8 +152,9 @@ with tabs[0]:
                     if r_calc["exists"]:
                         st.write(f"**Rim:** {row.get('r_rim')}")
                         st.write(f"**Hub:** {row.get('r_hub')}")
-                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
-                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
+                        if not f_calc["exists"]:
+                            st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                            st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                         st.write(f"**Serial:** `{row.get('r_rim_serial', 'NONE')}`")
                         st.info(f"📏 **Lengths**\nL: {row.get('r_l')}mm / R: {row.get('r_r')}mm")
                         with st.container(border=True):
@@ -162,6 +165,9 @@ with tabs[0]:
 
                 with c3:
                     st.markdown("**⚙️ LOGISTICS & TOTALS**")
+                    if f_calc["exists"] and r_calc["exists"]:
+                        st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
+                        st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                     st.divider()
                     st.metric("📦 WHEELSET TOTAL", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
@@ -223,6 +229,7 @@ with tabs[2]:
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
+        fr, rr = '', ''
         cf, cr = st.columns(2)
         if build_type in ["Full Wheelset", "Front Only"]:
             with cf:
@@ -245,9 +252,20 @@ with tabs[2]:
                         "nipple": sc2.selectbox("Nipple", df_nip['label'] if not df_nip.empty else ["Standard"], key="reg_nip"),
                         "notes": st.text_area("Notes", key="reg_notes")})
         if st.form_submit_button("🚀 Finalize Build"):
-            base.table("builds").create(payload)
-            st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
-            st.cache_data.clear(); st.success("Registered!"); st.rerun()
+            errors = []
+            if not cust or not cust.strip():
+                errors.append("Customer name is required.")
+            has_front = build_type in ["Full Wheelset", "Front Only"] and fr and fr.strip()
+            has_rear = build_type in ["Full Wheelset", "Rear Only"] and rr and rr.strip()
+            if not has_front and not has_rear:
+                errors.append("At least one wheel (Rim + Hub) must be specified.")
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                base.table("builds").create(payload)
+                st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
+                st.cache_data.clear(); st.success("Registered!"); st.rerun()
 
 # --- TAB 4: LIBRARY ---
 with tabs[3]:
@@ -255,7 +273,7 @@ with tabs[3]:
     with st.expander("➕ Add New Component", expanded=False):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
         with st.form("lib_add_v15_4"):
-            name = st.text_input(f"New {cat} Name", key="lib_name")
+            name = st.text_input("Component Name", key="lib_name")
             c1, c2 = st.columns(2)
             lib_p = {}
             if cat == "Rim":
