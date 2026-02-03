@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.0", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v16.1", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -66,8 +66,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.0")
-st.caption("Workshop Command Center | Data Migration Logic Enabled")
+st.title("🚲 Wheelbuilder Lab v16.1")
+st.caption("Workshop Command Center | Manual Archive Management")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -176,52 +176,10 @@ with tabs[1]:
                 st.toast("Recipe archived!")
             st.success(f"Staged {target}!")
 
-# --- TAB 3: PROVEN RECIPES (Archive & Migration Tool) ---
+# --- TAB 3: PROVEN RECIPES ---
 with tabs[2]:
     st.header("📜 Proven Recipe Archive")
     df_recipes = fetch_data("spoke_db", "combo_id")
-    
-    # Hidden Migration Tool
-    with st.expander("🛠️ Archive Maintenance"):
-        st.write("Scan existing build history to populate this database automatically.")
-        if st.button("🚀 Seed Archive from Build History"):
-            with st.status("Analyzing build history...", expanded=True) as status:
-                all_builds = base.table("builds").all()
-                db_table = base.table("spoke_db")
-                new_recipes = 0
-                
-                # Logic to extract unique recipes from history
-                for b in all_builds:
-                    f = b['fields']
-                    # Process both Front and Rear if they exist
-                    wheels = []
-                    if f.get('f_rim'): wheels.append(('f_rim', 'f_hub', 'f_l', 'f_r'))
-                    if f.get('r_rim'): wheels.append(('r_rim', 'r_hub', 'r_l', 'r_r'))
-                    
-                    for rim_key, hub_key, l_key, r_key in wheels:
-                        r_name, h_name = f.get(rim_key), f.get(hub_key)
-                        l_val, r_val = f.get(l_key), f.get(r_key)
-                        
-                        # Find original IDs from library to ensure links don't break
-                        rd_match = get_comp_data(df_rims, r_name)
-                        hd_match = get_comp_data(df_hubs, h_name)
-                        
-                        if rd_match and hd_match:
-                            # We assume JB for history unless marked. For migration, 
-                            # we search by name and lengths
-                            formula = f"AND({{rim}}='{r_name}', {{hub}}='{h_name}', {{len_l}}={l_val})"
-                            existing = db_table.all(formula=formula)
-                            
-                            if not existing:
-                                db_table.create({
-                                    "rim": [rd_match['id']], "hub": [hd_match['id']], 
-                                    "len_l": float(l_val), "len_r": float(r_val),
-                                    "holes": int(rd_match.get('holes', 28)), "crosses": 3, # Defaulting 3x for migration
-                                    "build_count": 1
-                                })
-                                new_recipes += 1
-                status.update(label=f"Migration Complete! Added {new_recipes} new recipes.", state="complete")
-                st.cache_data.clear(); st.rerun()
 
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
@@ -229,13 +187,14 @@ with tabs[2]:
         cols = ['label', 'len_l', 'len_r', 'build_count']
         existing_cols = [c for c in cols if c in df_recipes.columns]
         st.dataframe(df_recipes[existing_cols].rename(columns={'label': 'Build Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
-    else: st.info("Recipe Archive is empty. Use the Maintenance tool above to import history.")
+    else: 
+        st.info("Recipe Archive is empty. Manually add recipes in Airtable or use the 'Save to Archive' check in the Calculator.")
 
 # --- TAB 4 & 5 (Registration & Library) ---
 with tabs[3]:
     st.header("📝 Register New Build")
     build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v16_0"):
+    with st.form("reg_form_v16_1"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -266,7 +225,7 @@ with tabs[4]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v16_0"):
+        with st.form("lib_add_v16_1"):
             name = st.text_input("Component Name")
             c1, c2 = st.columns(2)
             lib_p = {}
@@ -279,4 +238,3 @@ with tabs[4]:
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
-
