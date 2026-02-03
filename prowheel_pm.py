@@ -169,7 +169,7 @@ with tabs[0]:
                         st.write(f"**Spoke:** {row.get('spoke', 'N/A')}")
                         st.write(f"**Nipple:** {row.get('nipple', 'N/A')}")
                     st.divider()
-                    st.metric("📦 WHEELSET TOTAL", f"{int(f_calc['total'] + r_calc['total'])}g")
+                    st.metric("📦 WHEELSET TOTAL WEIGHT", f"{int(f_calc['total'] + r_calc['total'])}g")
                     st.divider()
                     if row.get('invoice_url'):
                         st.link_button("📄 Invoice", row['invoice_url'], use_container_width=True)
@@ -294,4 +294,5 @@ with tabs[3]:
     view_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(view_cat, "id")
     if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True)
+
 
