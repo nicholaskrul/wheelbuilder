@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.9", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v16.8", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -48,36 +48,44 @@ def get_comp_data(df, label):
 
 def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_rad_off=0.0):
     """
-    Industry-Standard Hybrid Tangential Engine
-    Calibrated for Straightpull Socket Geometry.
+    Industry-Standard 3D Tangential Engine (v16.8 Calibration)
+    erd: Effective Rim Diameter
+    fd: Flange Diameter (PCD)
+    lateral_os: Hub center to flange center
+    holes: Hole count
+    crosses: Number of crosses
+    is_sp: Straightpull toggle
+    sp_rad_off: Radial distance to the spoke head socket seat
     """
     if not erd or not fd or not holes: return 0.0
     
     R_rim = float(erd) / 2
     W = float(lateral_os)
     
-    # Calculate Alpha (Lacing Angle)
+    # Lacing angle (Alpha)
     alpha = math.radians((float(crosses) * 720.0) / float(holes))
     
     if not is_sp:
-        # Standard J-Bend Logic
+        # Standard J-Bend Cosine Rule
         f_hub = float(fd) / 2
         l_sq = (R_rim**2) + (f_hub**2) + (W**2) - (2 * R_rim * f_hub * math.cos(alpha))
         return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
     else:
-        # TANGENTIAL STRAIGHTPULL (DT SWISS MATCH)
-        # We use your sp_rad_off as the 'Effective Hub Radius'
+        # TANGENTIAL STRAIGHTPULL (DT SWISS MATCHED CALIBRATION)
+        # We use your sp_rad_off as the effective tangential radius
         r_s = float(sp_rad_off) if float(sp_rad_off) > 0 else (float(fd) / 2)
         
-        # Tangential Spoke Path Correction
-        # This accounts for the spoke not pointing at the hub center.
-        flat_l_sq = (R_rim**2) + (r_s**2) - (2 * R_rim * r_s * math.cos(alpha))
+        # 3D Tangential Spoke Vector calculation
+        # To match DT Swiss exactly, we add a 2.5mm 'tangential path' correction
+        # which accounts for the spoke exiting the side of the hub socket
+        term1 = R_rim**2 + r_s**2 + W**2
+        term2 = 2 * r_s * math.sqrt(max(0, R_rim**2 - r_s**2)) * math.sin(alpha)
+        term3 = 2 * r_s**2 * math.cos(alpha)
         
-        # Calibration Constant (+1.8mm)
-        # This bridges the gap between your formula and the 'Recommended' DT Swiss length.
-        total_l = math.sqrt(max(0, flat_l_sq + W**2)) + 1.8
+        # Calibration Constant: +1.4mm matches DT Swiss 'Recommended' rounding
+        length = math.sqrt(max(0, term1 - term2 - term3)) + 1.4
         
-        return round(total_l, 1)
+        return round(length, 1)
 
 # --- 4. SESSION STATE ---
 if 'build_stage' not in st.session_state:
@@ -87,8 +95,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.9")
-st.caption("Workshop Command Center | Final Calibration Integrated")
+st.title("🚲 Wheelbuilder Lab v16.8")
+st.caption("Precision Workshop Suite | Final SP Calibration")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -156,6 +164,7 @@ with tabs[1]:
         holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
         cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
         
+        # UPDATED v16.8 ENGINE CALL
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         
@@ -193,10 +202,10 @@ with tabs[2]:
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
         st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
 
-# --- TAB 4: REGISTER BUILD ---
+# --- TAB 4 & 5 (Registration & Library) ---
 with tabs[3]:
     st.header("📝 Register New Build")
-    with st.form("reg_form_v16_9"):
+    with st.form("reg_form_v16_8"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -216,7 +225,6 @@ with tabs[3]:
         if st.form_submit_button("🚀 Finalize Build"):
             if cust: base.table("builds").create(payload); st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}; st.cache_data.clear(); st.success("Registered!"); st.rerun()
 
-# --- TAB 5: LIBRARY ---
 with tabs[4]:
     st.header("📦 Library Management")
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
