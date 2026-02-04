@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.10", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v17.0", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -37,7 +37,58 @@ def fetch_data(table_name, label_col):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. ANALYTICS HELPERS ---
+# --- 3. THE REBUILT CALCULATION ENGINE ---
+def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_rad_off=0.0):
+    """
+    V17.0 REBUILT ENGINE: True Tangential Geometric Solver
+    erd: Effective Rim Diameter
+    fd: Flange Diameter (PCD)
+    lateral_os: Hub center to flange center (Dish)
+    holes: Total hole count
+    crosses: Number of crosses
+    is_sp: Straightpull Toggle
+    sp_rad_off: The radial distance from axle to the internal spoke seat.
+    """
+    if not erd or not fd or not holes: return 0.0
+    
+    R_rim = float(erd) / 2
+    W = float(lateral_os)
+    
+    # Calculate the Angle of Rotation (Theta)
+    # The spoke moves (crosses * 360 / (holes/2)) degrees around the wheel.
+    theta = math.radians((float(crosses) * 720.0) / float(holes))
+    
+    if not is_sp:
+        # Standard J-Bend Geometry (Radial Path)
+        r_hub = float(fd) / 2
+        l_sq = (R_rim**2) + (r_hub**2) + (W**2) - (2 * R_rim * r_hub * math.cos(theta))
+        # 1.2mm is the industry standard deduction for J-bend stretch/seat
+        return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
+    else:
+        # --- TOTAL SP RECONSTRUCTION ---
+        # 1. Define the effective Hub Radius (S). 
+        # For SP, this is the distance to the tangential exit/seat.
+        S = float(sp_rad_off) if float(sp_rad_off) > 0 else (float(fd) / 2)
+        
+        # 2. Tangential Spoke Pathing
+        # Unlike J-bend, SP spokes are tangent to circle S. 
+        # The 'radial' component is modified by the tangent offset.
+        # This formula solves for the 3D distance where the spoke head is 
+        # offset by radius S and angled by theta.
+        
+        # Geometry: Length = sqrt( R^2 + S^2 + W^2 - 2*S*sqrt(R^2 - S^2)*sin(theta) - 2*S^2*cos(theta) )
+        term1 = R_rim**2 + S**2 + W**2
+        term2 = 2 * S * math.sqrt(max(0, R_rim**2 - S**2)) * math.sin(theta)
+        term3 = 2 * S**2 * math.cos(theta)
+        
+        raw_length = math.sqrt(max(0, term1 - term2 - term3))
+        
+        # 3. Final Calibration
+        # Straightpull spokes require no elbow stretch deduction.
+        # We apply a +0.5mm correction to match DT Swiss's proprietary nipple-seat depth.
+        return round(raw_length + 0.5, 1)
+
+# --- 4. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
     if df.empty or not label: return {}
     target = str(label).strip().lower()
@@ -46,49 +97,15 @@ def get_comp_data(df, label):
     match = df_norm[df_norm['match_label'] == target]
     return match.iloc[0].to_dict() if not match.empty else {}
 
-def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_rad_off=0.0):
-    """
-    Industry-Standard Hybrid Tangential Engine v16.10
-    Calibrated for Straightpull Socket Geometry.
-    """
-    if not erd or not fd or not holes: return 0.0
-    
-    R_rim = float(erd) / 2
-    W = float(lateral_os)
-    
-    # Calculate Alpha (Lacing Angle)
-    alpha = math.radians((float(crosses) * 720.0) / float(holes))
-    
-    if not is_sp:
-        # Standard J-Bend Logic
-        f_hub = float(fd) / 2
-        l_sq = (R_rim**2) + (f_hub**2) + (W**2) - (2 * R_rim * f_hub * math.cos(alpha))
-        return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
-    else:
-        # TANGENTIAL STRAIGHTPULL (DT SWISS MATCH)
-        # We use your sp_rad_off as the 'Effective Hub Radius'
-        r_s = float(sp_rad_off) if float(sp_rad_off) > 0 else (float(fd) / 2)
-        
-        # Tangential Spoke Path Correction
-        # This accounts for the spoke not pointing at the hub center.
-        flat_l_sq = (R_rim**2) + (r_s**2) - (2 * R_rim * r_s * math.cos(alpha))
-        
-        # Calibration Constant (+1.8mm)
-        # This bridges the gap to match 'Recommended' DT Swiss length.
-        total_l = math.sqrt(max(0, flat_l_sq + W**2)) + 1.8
-        
-        return round(total_l, 1)
+# --- 5. MAIN UI ---
+st.title("🚲 Wheelbuilder Lab v17.0")
+st.caption("Precision Workshop Suite | Rebuilt Tangential SP Engine")
 
-# --- 4. SESSION STATE ---
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
         'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0,
         'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0
     }
-
-# --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.10")
-st.caption("Workshop Command Center | Final Calibration Integrated")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -156,6 +173,7 @@ with tabs[1]:
         holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
         cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
         
+        # REBUILT ENGINE CALL
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         
@@ -196,7 +214,7 @@ with tabs[2]:
 # --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
     st.header("📝 Register New Build")
-    with st.form("reg_form_v16_10"):
+    with st.form("reg_form_v17_0"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
@@ -210,7 +228,7 @@ with tabs[3]:
         with cr:
             st.subheader("Rear")
             rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-            rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
+            rh = st.text_input("Hub", value=st.session_state.build_state.build_stage['r_hub'] if 'r_hub' in st.session_state.build_stage else '', key="reg_rh")
             rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
             payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
         if st.form_submit_button("🚀 Finalize Build"):
