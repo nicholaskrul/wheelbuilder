@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.3.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v17.3", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -13,7 +13,7 @@ try:
     AIRTABLE_BASE_ID = st.secrets["airtable"]["base_id"]
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
-except Exception as e:
+except Exception:
     st.error("❌ Airtable Secrets Error: Ensure keys are in Streamlit Secrets.")
     st.stop()
 
@@ -37,47 +37,48 @@ def fetch_data(table_name, label_col):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. THE UPDATED TANGENTIAL ENGINE ---
-def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_rad_off=0.0):
+# --- 3. THE BLUEPRINT-CORRECTED ENGINE ---
+def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_tangent_offset=0.0):
     """
-    True Tangential Geometric Solver.
+    V17.3 BLUEPRINT ENGINE: Tangential Offset Solver
     erd: Effective Rim Diameter
     fd: Flange Diameter (PCD)
     lateral_os: Hub center to flange center (W)
     holes: Total hole count
     crosses: Number of crosses
     is_sp: Straightpull Toggle
-    sp_rad_off: User-provided radial distance to the socket seat.
+    sp_tangent_offset: The 0.4 / 0.5 offset from the blueprint
     """
     if not erd or not fd or not holes: return 0.0
     
     R_rim = float(erd) / 2
+    R_hub = float(fd) / 2
     W = float(lateral_os)
+    T = float(sp_tangent_offset) # The 0.4 or 0.5 blueprint value
     
     # Calculate Angle of Rotation (Alpha)
     alpha = math.radians((float(crosses) * 720.0) / float(holes))
     
     if not is_sp:
         # Standard J-Bend (Radial Cosine Rule)
-        r_hub = float(fd) / 2
-        l_sq = (R_rim**2) + (r_hub**2) + (W**2) - (2 * R_rim * r_hub * math.cos(alpha))
+        l_sq = (R_rim**2) + (R_hub**2) + (W**2) - (2 * R_rim * R_hub * math.cos(alpha))
         return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
     else:
-        # --- TRUE TANGENTIAL STRAIGHTPULL LOGIC ---
-        # We use sp_rad_off as the radius of tangency (r)
-        r = float(sp_rad_off) if float(sp_rad_off) > 0 else (float(fd) / 2)
+        # --- BLUEPRINT TANGENTIAL MATH ---
+        # 1. Calculate the 'Radial' distance to the exit point
+        # Because of the 0.4/0.5 offset, the spoke length is increased
+        # to account for the 'lever arm' of the tangential drilling.
         
-        # This formula calculates the 3D distance where the spoke exits 
-        # tangent to circle 'r'.
-        # Formula: sqrt( R^2 + r^2 + W^2 - 2 * r * sqrt(R^2 - r^2) * sin(alpha) - 2 * r^2 * cos(alpha) )
-        term1 = R_rim**2 + r**2 + W**2
-        term2 = 2 * r * math.sqrt(max(0, R_rim**2 - r**2)) * math.sin(alpha)
-        term3 = 2 * r**2 * math.cos(alpha)
+        # This solves the 3D vector from the offset hub hole to the rim hole.
+        # Length = sqrt( R_rim^2 + R_hub^2 + W^2 - 2 * R_rim * (R_hub * cos(alpha) + T * sin(alpha)) )
         
-        raw_length = math.sqrt(max(0, term1 - term2 - term3))
+        term1 = R_rim**2 + R_hub**2 + W**2
+        term2 = 2 * R_rim * (R_hub * math.cos(alpha) + T * math.sin(alpha))
         
-        # Calibration: -0.3mm adjustment for SP (no elbow wrap, nipple seat only)
-        return round(raw_length - 0.3, 1)
+        raw_l = math.sqrt(max(0, term1 - term2))
+        
+        # 0.2mm constant for nipple seat engagement (matching DT Swiss Recommended)
+        return round(raw_l + 0.2, 1)
 
 # --- 4. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
@@ -89,8 +90,8 @@ def get_comp_data(df, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.3.1")
-st.caption("Workshop Command Center | Tangential SP Engine Calibration")
+st.title("🚲 Wheelbuilder Lab v17.3")
+st.caption("Precision Workshop Suite | Blueprint-Calibrated SP Engine")
 
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
@@ -123,7 +124,7 @@ with tabs[0]:
                 with c1: st.info(f"🔘 Front: {row.get('f_l')} / {row.get('f_r')} mm")
                 with c2: st.success(f"🔘 Rear: {row.get('r_l')} / {row.get('r_r')} mm")
                 with c3:
-                    if st.button("Refresh", key=f"ref_{row['id']}"): st.rerun()
+                    if st.button("Update Build", key=f"upd_{row['id']}"): st.rerun()
 
 # --- TAB 2: CALCULATOR ---
 with tabs[1]:
@@ -139,7 +140,8 @@ with tabs[1]:
         holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
         cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
         
-        # UPDATED TANGENTIAL ENGINE CALL
+        # BLUEPRINT ENGINE CALL
+        # Note: 'sp_off_l' in your Airtable should now hold the 0.4 or 0.5 blueprint value
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         
@@ -147,8 +149,6 @@ with tabs[1]:
         st.metric("Right Spoke", f"{r_len} mm")
         
         target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
-        save_to_db = st.checkbox("💾 Save to Proven Recipe Archive", value=True, key="save_recipe")
-        
         if st.button("💾 Stage & Save Data", key="calc_stage_btn", use_container_width=True):
             if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
             else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
@@ -157,7 +157,7 @@ with tabs[1]:
 # --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
     st.header("📝 Register New Build")
-    with st.form("reg_form_v16_3_1"):
+    with st.form("reg_form_v17_3"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
@@ -172,7 +172,7 @@ with tabs[3]:
             rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
             rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
         if st.form_submit_button("🚀 Finalize Build"):
-            if cust:
+            if cust: 
                 payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", 
                            "f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr, "r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr}
                 base.table("builds").create(payload)
