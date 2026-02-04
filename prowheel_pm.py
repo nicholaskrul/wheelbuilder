@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v16.5", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v16.6", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -13,7 +13,7 @@ try:
     AIRTABLE_BASE_ID = st.secrets["airtable"]["base_id"]
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
-except Exception as e:
+except Exception:
     st.error("❌ Airtable Secrets Error: Ensure keys are in Streamlit Secrets.")
     st.stop()
 
@@ -48,41 +48,35 @@ def get_comp_data(df, label):
 
 def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_rad_off=0.0):
     """
-    Precision Spoke Calculation Engine
-    erd: Effective Rim Diameter
-    fd: Flange Diameter (PCD)
-    lateral_os: Hub center to flange center
-    holes: Hole count
-    crosses: Number of crosses
-    is_sp: Straightpull toggle
-    sp_rad_off: Radial distance from axle to SP socket (compensates for socket depth)
+    True Tangential Spoke Engine
+    sp_rad_off: The radial distance from axle to the socket seat center.
     """
     if not erd or not fd or not holes: return 0.0
     
-    R = float(erd) / 2
-    f = float(fd) / 2
-    d = float(lateral_os)
+    R_rim = float(erd) / 2
+    f_hub = float(fd) / 2
+    d_width = float(lateral_os)
     
-    # Calculate the angle based on crosses (720 / holes per cross)
+    # Standard lacing angle based on crosses
     angle_rad = math.radians((float(crosses) * 720.0) / float(holes))
     
     if not is_sp:
-        # Standard J-Bend Cosine Rule
-        # 1.2mm deduction accounts for J-bend elbow stretch and nipple bed engagement
-        l_sq = (R**2) + (f**2) + (d**2) - (2 * R * f * math.cos(angle_rad))
+        # Standard J-Bend (Radial Cosine Rule)
+        l_sq = (R_rim**2) + (f_hub**2) + (d_width**2) - (2 * R_rim * f_hub * math.cos(angle_rad))
         return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
     else:
-        # TANGENTIAL STRAIGHTPULL LOGIC
-        # We use the user-defined radial offset as the start-point radius
-        r_hub = float(sp_rad_off) if float(sp_rad_off) > 0 else f
+        # TRUE TANGENTIAL STRAIGHTPULL CALCULATION
+        # r_s is the radius of tangency (your sp_rad_off)
+        r_s = float(sp_rad_off) if float(sp_rad_off) > 0 else f_hub
         
-        # Tangential math accounts for the fact that the spoke points past the axle center.
-        # This increases the effective 'stretch' around the hub body.
-        flat_l_sq = (R**2) + (r_hub**2) - (2 * R * r_hub * math.cos(angle_rad))
-        total_l = math.sqrt(max(0, flat_l_sq + d**2))
+        # This formula calculates the hypotenuse from the rim hole 
+        # tangent to the hub socket, accounting for the 3D lateral offset.
+        term1 = R_rim**2 + r_s**2 + d_width**2
+        term2 = 2 * R_rim * r_s * math.cos(angle_rad)
         
-        # 0.2mm deduction for Straightpull (no elbow stretch, only nipple seat engagement)
-        return round(total_l - 0.2, 1)
+        # 0.2mm deduction for SP nipple bed engagement (no elbow stretch).
+        length = math.sqrt(max(0, term1 - term2))
+        return round(length - 0.2, 1)
 
 # --- 4. SESSION STATE ---
 if 'build_stage' not in st.session_state:
@@ -92,8 +86,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v16.5")
-st.caption("Workshop Command Center | Tangential SP Engine v2.0")
+st.title("🚲 Wheelbuilder Lab v16.6")
+st.caption("Workshop Command Center | Tangential SP Engine Calibration")
 
 tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -103,7 +97,7 @@ with tabs[0]:
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
     with c_sync2:
         if st.button("🔄 Sync Data", key="global_sync", use_container_width=True):
-            st.cache_data.clear(); st.toast("Synced with Airtable!"); st.rerun()
+            st.cache_data.clear(); st.toast("Synced!"); st.rerun()
     
     df_builds = fetch_data("builds", "customer")
     df_rims = fetch_data("rims", "rim")
@@ -118,14 +112,14 @@ with tabs[0]:
             s_data, n_data = get_comp_data(df_spokes, row.get('spoke')), get_comp_data(df_nipples, row.get('nipple'))
             sw, nw = float(s_data.get('weight', 0)), float(n_data.get('weight', 0))
             
-            f_calc = {"total": 0.0, "exists": False, "rim_w": 0.0, "hub_w": 0.0}
+            f_calc = {"total": 0.0, "exists": False}
             if row.get('f_rim'):
                 frd, fhd = get_comp_data(df_rims, row.get('f_rim')), get_comp_data(df_hubs, row.get('f_hub'))
                 if frd:
                     f_calc.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0)), "holes": int(frd.get('holes', 24))})
                     f_calc["total"] = f_calc["rim_w"] + f_calc["hub_w"] + (f_calc["holes"] * (sw + nw))
 
-            r_calc = {"total": 0.0, "exists": False, "rim_w": 0.0, "hub_w": 0.0}
+            r_calc = {"total": 0.0, "exists": False}
             if row.get('r_rim'):
                 rrd, rhd = get_comp_data(df_rims, row.get('r_rim')), get_comp_data(df_hubs, row.get('r_hub'))
                 if rrd:
@@ -133,11 +127,6 @@ with tabs[0]:
                     r_calc["total"] = r_calc["rim_w"] + r_calc["hub_w"] + (r_calc["holes"] * (sw + nw))
 
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', '---')})"):
-                cur_stat = row.get('status', 'Order Received')
-                new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", index=["Order Received", "Parts Received", "Building", "Complete"].index(cur_stat))
-                if new_stat != cur_stat:
-                    base.table("builds").update(row['id'], {"status": new_stat}); st.cache_data.clear(); st.rerun()
-                st.divider()
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.markdown("**🔘 FRONT**")
@@ -151,13 +140,6 @@ with tabs[0]:
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                 with c3:
                     st.metric("📦 SET WEIGHT", f"{int(f_calc['total'] + r_calc['total'])}g")
-                    with st.popover("📝 Details"):
-                        fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
-                        rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
-                        nt = st.text_area("Build Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
-                        if st.button("Save", key=f"btn_{row['id']}", use_container_width=True):
-                            base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            st.cache_data.clear(); st.rerun()
 
 # --- TAB 2: CALCULATOR ---
 with tabs[1]:
@@ -212,57 +194,33 @@ with tabs[2]:
 # --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
     st.header("📝 Register New Build")
-    build_type = st.radio("Config:", ["Full Wheelset", "Front Only", "Rear Only"], horizontal=True, key="reg_type")
-    with st.form("reg_form_v16_5"):
+    with st.form("reg_form_v16_6"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv}
         cf, cr = st.columns(2)
-        if build_type in ["Full Wheelset", "Front Only"]:
-            with cf:
-                st.subheader("Front")
-                fr = st.text_input("Rim", value=st.session_state.build_stage['f_rim'], key="reg_fr")
-                fh = st.text_input("Hub", value=st.session_state.build_stage['f_hub'], key="reg_fh")
-                fl, frr = st.number_input("L-Len", value=st.session_state.build_stage['f_l']), st.number_input("R-Len", value=st.session_state.build_stage['f_r'])
-                payload.update({"f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr})
-        if build_type in ["Full Wheelset", "Rear Only"]:
-            with cr:
-                st.subheader("Rear")
-                rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-                rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
-                rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
-                payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
-        sc1, sc2 = st.columns(2)
-        payload.update({"spoke": sc1.selectbox("Spoke", df_spokes['label'] if not df_spokes.empty else ["Std"], key="reg_spk"),
-                        "nipple": sc2.selectbox("Nipple", df_nipples['label'] if not df_nipples.empty else ["Std"], key="reg_nip"),
-                        "notes": st.text_area("Build Journal", key="reg_nt")})
+        with cf:
+            st.subheader("Front")
+            fr = st.text_input("Rim", value=st.session_state.build_stage['f_rim'], key="reg_fr")
+            fh = st.text_input("Hub", value=st.session_state.build_stage['f_hub'], key="reg_fh")
+            fl, frr = st.number_input("L-Len", value=st.session_state.build_stage['f_l']), st.number_input("R-Len", value=st.session_state.build_stage['f_r'])
+            payload.update({"f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr})
+        with cr:
+            st.subheader("Rear")
+            rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
+            rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
+            rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
+            payload.update({"r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr})
         if st.form_submit_button("🚀 Finalize Build"):
-            if cust:
-                base.table("builds").create(payload)
-                st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
-                st.cache_data.clear(); st.success("Registered!"); st.rerun()
-            else: st.error("Customer name is required.")
+            if cust: base.table("builds").create(payload); st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}; st.cache_data.clear(); st.success("Registered!"); st.rerun()
 
 # --- TAB 5: LIBRARY ---
 with tabs[4]:
     st.header("📦 Library Management")
-    with st.expander("➕ Add New Component"):
-        cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True, key="lib_cat")
-        with st.form("lib_add_v16_5"):
-            name = st.text_input("Component Name")
-            c1, c2 = st.columns(2)
-            lib_p = {}
-            if cat == "Rim": lib_p = {"rim": name, "erd": c1.number_input("ERD (mm)", step=0.1), "holes": c2.number_input("Hole Count", step=1, value=24), "weight": st.number_input("Weight (g)", step=0.1)}
-            elif cat == "Hub": lib_p = {"hub": name, "fd_l": c1.number_input("FD Left", step=0.1), "fd_r": c2.number_input("FD Right", step=0.1), "os_l": c1.number_input("Offset L", step=0.1), "os_r": c2.number_input("Offset R", step=0.1), "sp_off_l": c1.number_input("SP Offset L", value=0.0), "sp_off_r": c2.number_input("SP Offset R", value=0.0), "weight": st.number_input("Weight (g)", step=0.1)}
-            elif cat in ["Spoke", "Nipple"]: lib_p = {cat.lower(): name, "weight": st.number_input("Unit Weight (g)", format="%.3f", step=0.001)}
-            if st.form_submit_button("Save to Library"):
-                if name: base.table(f"{cat.lower()}s").create(lib_p); st.cache_data.clear(); st.success("Added!"); st.rerun()
-    
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_v")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty:
         l_search = st.text_input("🔍 Search Library", key="lib_search")
         if l_search:
-            # We search across all columns for the library
             df_l = df_l[df_l.apply(lambda row: row.astype(str).str.contains(l_search, case=False).any(), axis=1)]
         st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True, hide_index=True)
