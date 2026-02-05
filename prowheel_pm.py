@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v17.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v17.5", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -37,44 +37,38 @@ def fetch_data(table_name, label_col):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. THE REBUILT CALCULATION ENGINE ---
-def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, sp_offset=0.0):
+# --- 3. THE SP-CORRECTED ENGINE ---
+def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, blueprint_offset=0.0):
     """
-    V17.4 PRECISION VECTOR ENGINE
-    Correctly handles Straightpull Tangential Geometry using the 'Blueprint Offset'.
+    V17.5 TANGENTIAL SHIFT ENGINE
+    J-Bend: Classic Cosine Rule
+    Straightpull: 0.5-Cross Rotational Correction + Linear Blueprint Offset
     """
     if not erd or not fd or not holes: return 0.0
     
-    R_rim = float(erd) / 2
-    R_hub = float(fd) / 2
+    R = float(erd) / 2
+    r = float(fd) / 2
     W = float(lateral_os)
     
-    # Calculate Angle of Rotation (Alpha)
-    alpha = math.radians((float(crosses) * 720.0) / float(holes))
+    # 1. Determine the effective cross pattern
+    # SpokeCalc logic: SP hubs add 0.5 to the cross count to model the tangential ear exit
+    eff_cross = float(crosses) + 0.5 if is_sp else float(crosses)
+    
+    # 2. Calculate Angle (Alpha)
+    alpha = math.radians((eff_cross * 720.0) / float(holes))
+    
+    # 3. Calculate Base Length (3D Hypotenuse)
+    l_sq = (R**2) + (r**2) + (W**2) - (2 * R * r * math.cos(alpha))
+    base_l = math.sqrt(max(0, l_sq))
     
     if not is_sp:
-        # Standard J-Bend (Radial Cosine Rule) - NO CHANGE
-        l_sq = (R_rim**2) + (R_hub**2) + (W**2) - (2 * R_rim * R_hub * math.cos(alpha))
-        return round(math.sqrt(max(0, l_sq)) - 1.2, 1)
+        # Standard 1.2mm deduction for J-bend elbow stretch
+        return round(base_l - 1.2, 1)
     else:
-        # --- TRUE TANGENTIAL VECTOR MATH ---
-        # T is the tangential offset from your blueprint (0.4 or 0.5)
-        T = float(sp_offset)
-        
-        # In a straightpull tangential hub, the spoke exit point is shifted 
-        # perpendicular to the hub radius by distance T.
-        # This solves the 3D distance where the spoke head is geometrically 
-        # offset and angled tangent to the hub circle.
-        
-        term1 = R_rim**2 + R_hub**2 + W**2
-        term2 = 2 * R_rim * (R_hub * math.cos(alpha) + T * math.sin(alpha))
-        
-        # The result of this calculation handles the 'lever arm' length increase.
-        raw_l = math.sqrt(max(0, term1 - term2))
-        
-        # We add 2.8mm to account for the internal seat depth and 
-        # nipple seat engagement required to match DT Swiss results.
-        return round(raw_l + 2.8, 1)
+        # Straightpull Logic: 
+        # Add the linear blueprint offset (0.4/0.5) 
+        # Add 1.8mm for internal socket-to-nipple-seat reach (DT Swiss calibration)
+        return round(base_l + float(blueprint_offset) + 1.8, 1)
 
 # --- 4. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
@@ -86,8 +80,8 @@ def get_comp_data(df, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v17.4")
-st.caption("Workshop Command Center | Vector Tangent Engine Overhaul")
+st.title("🚲 Wheelbuilder Lab v17.5")
+st.caption("Workshop Command Center | SpokeCalc.io Logic Integrated")
 
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
@@ -115,12 +109,12 @@ with tabs[0]:
         search = st.text_input("🔍 Search Customer", key="main_search")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False, na=False)] if search else df_builds
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date')})"):
                 c1, c2, c3 = st.columns(3)
                 with c1: st.info(f"🔘 Front: {row.get('f_l')} / {row.get('f_r')} mm")
                 with c2: st.success(f"🔘 Rear: {row.get('r_l')} / {row.get('r_r')} mm")
                 with c3:
-                    if st.button("Update", key=f"upd_{row['id']}"): st.rerun()
+                    if st.button("Update Build", key=f"upd_{row['id']}"): st.rerun()
 
 # --- TAB 2: CALCULATOR ---
 with tabs[1]:
@@ -136,8 +130,7 @@ with tabs[1]:
         holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
         cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
         
-        # VECTOR ENGINE EXECUTION
-        # sp_off_l/r should hold the 0.4 / 0.5 offsets from your blueprint
+        # LOGIC INTEGRATION: Thomas + SpokeCalc logic
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         
@@ -153,7 +146,7 @@ with tabs[1]:
 # --- TAB 4: REGISTER BUILD ---
 with tabs[3]:
     st.header("📝 Register New Build")
-    with st.form("reg_form_v17_4"):
+    with st.form("reg_form_v17_5"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
@@ -165,10 +158,10 @@ with tabs[3]:
         with cr:
             st.subheader("Rear")
             rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-            rh = st.text_input("Hub", value=st.session_state.build_stage['r_hub'], key="reg_rh")
+            rh = st.text_input("Hub", value=st.session_state.build_state.build_stage['r_hub'] if 'r_hub' in st.session_state.build_stage else '', key="reg_rh")
             rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
         if st.form_submit_button("🚀 Finalize Build"):
-            if cust:
+            if cust: 
                 payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", 
                            "f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr, "r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr}
                 base.table("builds").create(payload)
