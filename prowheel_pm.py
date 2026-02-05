@@ -37,37 +37,36 @@ def fetch_data(table_name, label_col):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. THE SP-CORRECTED ENGINE ---
+# --- 3. THE SP-CORRECTED ENGINE (v17.5) ---
 def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, blueprint_offset=0.0):
     """
     V17.5 TANGENTIAL SHIFT ENGINE
-    J-Bend: Classic Cosine Rule
-    Straightpull: 0.5-Cross Rotational Correction + Linear Blueprint Offset
+    J-Bend: Classic Cosine Rule (No changes).
+    Straightpull: Uses the '+0.5 Cross' rule to model tangential ear exit.
     """
     if not erd or not fd or not holes: return 0.0
     
     R = float(erd) / 2
-    r = float(fd) / 2
+    r_hub = float(fd) / 2
     W = float(lateral_os)
     
     # 1. Determine the effective cross pattern
-    # SpokeCalc logic: SP hubs add 0.5 to the cross count to model the tangential ear exit
+    # SP hubs exit half a hole-interval further than J-bend.
     eff_cross = float(crosses) + 0.5 if is_sp else float(crosses)
     
     # 2. Calculate Angle (Alpha)
     alpha = math.radians((eff_cross * 720.0) / float(holes))
     
     # 3. Calculate Base Length (3D Hypotenuse)
-    l_sq = (R**2) + (r**2) + (W**2) - (2 * R * r * math.cos(alpha))
+    l_sq = (R**2) + (r_hub**2) + (W**2) - (2 * R * r_hub * math.cos(alpha))
     base_l = math.sqrt(max(0, l_sq))
     
     if not is_sp:
         # Standard 1.2mm deduction for J-bend elbow stretch
         return round(base_l - 1.2, 1)
     else:
-        # Straightpull Logic: 
-        # Add the linear blueprint offset (0.4/0.5) 
-        # Add 1.8mm for internal socket-to-nipple-seat reach (DT Swiss calibration)
+        # Straightpull Logic:
+        # Linear offset (0.4/0.5 from blueprint) + 1.8mm for internal seat engagement.
         return round(base_l + float(blueprint_offset) + 1.8, 1)
 
 # --- 4. ANALYTICS HELPERS ---
@@ -81,7 +80,7 @@ def get_comp_data(df, label):
 
 # --- 5. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v17.5")
-st.caption("Workshop Command Center | SpokeCalc.io Logic Integrated")
+st.caption("Workshop Command Center | Tangential Vector Integration")
 
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
@@ -109,12 +108,12 @@ with tabs[0]:
         search = st.text_input("🔍 Search Customer", key="main_search")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False, na=False)] if search else df_builds
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date')})"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
                 c1, c2, c3 = st.columns(3)
                 with c1: st.info(f"🔘 Front: {row.get('f_l')} / {row.get('f_r')} mm")
                 with c2: st.success(f"🔘 Rear: {row.get('r_l')} / {row.get('r_r')} mm")
                 with c3:
-                    if st.button("Update Build", key=f"upd_{row['id']}"): st.rerun()
+                    if st.button("Refresh Results", key=f"upd_{row['id']}"): st.rerun()
 
 # --- TAB 2: CALCULATOR ---
 with tabs[1]:
@@ -130,7 +129,7 @@ with tabs[1]:
         holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
         cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
         
-        # LOGIC INTEGRATION: Thomas + SpokeCalc logic
+        # Engine execution with v17.5 logic
         l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
         r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
         
