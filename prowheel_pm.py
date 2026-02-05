@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v17.6", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v17.7", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -37,35 +37,7 @@ def fetch_data(table_name, label_col):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. THE SP-CORRECTED ENGINE (v17.6) ---
-def calculate_spoke(erd, fd, lateral_os, holes, crosses, is_sp=False, blueprint_offset=0.0):
-    """
-    V17.6 TANGENTIAL VECTOR ENGINE
-    Corrects the 5mm gap by applying the +0.5 cross shift for SP hubs.
-    """
-    if not erd or not fd or not holes: return 0.0
-    
-    R = float(erd) / 2
-    r_hub = float(fd) / 2
-    W = float(lateral_os)
-    
-    # 1. Apply the 0.5 cross shift for Straightpull
-    eff_cross = float(crosses) + 0.5 if is_sp else float(crosses)
-    
-    # 2. Calculate Lacing Angle
-    alpha = math.radians((eff_cross * 720.0) / float(holes))
-    
-    # 3. Calculate 3D Hypotenuse
-    l_sq = (R**2) + (r_hub**2) + (W**2) - (2 * R * r_hub * math.cos(alpha))
-    base_l = math.sqrt(max(0, l_sq))
-    
-    if not is_sp:
-        return round(base_l - 1.2, 1) # J-bend deduction
-    else:
-        # SP Calibration: Linear blueprint offset + 1.8mm seat engagement
-        return round(base_l + float(blueprint_offset) + 1.8, 1)
-
-# --- 4. ANALYTICS HELPERS ---
+# --- 3. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
     if df.empty or not label: return {}
     target = str(label).strip().lower()
@@ -74,18 +46,18 @@ def get_comp_data(df, label):
     match = df_norm[df_norm['match_label'] == target]
     return match.iloc[0].to_dict() if not match.empty else {}
 
-# --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v17.6")
-st.caption("Precision Workshop Suite | Stable Vector Engine")
-
-# Corrected Session State Initialization
+# --- 4. SESSION STATE ---
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
         'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0,
         'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0
     }
 
-tabs = st.tabs(["🏁 Workshop", "🧮 Precision Calc", "➕ Register Build", "📦 Library"])
+# --- 5. MAIN UI ---
+st.title("🚲 Wheelbuilder Lab v17.7")
+st.caption("Workshop Command Center | Streamlined Manual Intake")
+
+tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
 # --- TAB 1: WORKSHOP ---
 with tabs[0]:
@@ -105,66 +77,78 @@ with tabs[0]:
         search = st.text_input("🔍 Search Customer", key="main_search")
         f_df = df_builds[df_builds['label'].str.contains(search, case=False, na=False)] if search else df_builds
         for _, row in f_df.sort_values('id', ascending=False).iterrows():
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', '---')})"):
                 c1, c2, c3 = st.columns(3)
-                with c1: st.info(f"🔘 Front: {row.get('f_l')} / {row.get('f_r')} mm")
-                with c2: st.success(f"🔘 Rear: {row.get('r_l')} / {row.get('r_r')} mm")
+                with c1:
+                    st.markdown("**🔘 FRONT**")
+                    st.write(f"**Rim:** {row.get('f_rim')}\n**Hub:** {row.get('f_hub')}")
+                    st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
+                with c2:
+                    st.markdown("**🔘 REAR**")
+                    st.write(f"**Rim:** {row.get('r_rim')}\n**Hub:** {row.get('r_hub')}")
+                    st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                 with c3:
-                    if st.button("Refresh", key=f"upd_{row['id']}"): st.rerun()
+                    cur_stat = row.get('status', 'Order Received')
+                    new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", index=["Order Received", "Parts Received", "Building", "Complete"].index(cur_stat))
+                    if new_stat != cur_stat:
+                        base.table("builds").update(row['id'], {"status": new_stat}); st.cache_data.clear(); st.rerun()
+                    
+                    with st.popover("📝 Update Journal"):
+                        fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
+                        rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                        nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                        if st.button("Save", key=f"btn_{row['id']}", use_container_width=True):
+                            base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
+                            st.cache_data.clear(); st.rerun()
 
-# --- TAB 2: CALCULATOR ---
+# --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
-    st.header("🧮 Spoke Length Engine")
-    if not df_rims.empty and not df_hubs.empty:
-        cr, ch = st.columns(2)
-        r_sel = cr.selectbox("Select Rim", df_rims['label'], key="calc_r_sel")
-        h_sel = ch.selectbox("Select Hub", df_hubs['label'], key="calc_h_sel")
-        rd, hd = get_comp_data(df_rims, r_sel), get_comp_data(df_hubs, h_sel)
-        st.divider()
-        col1, col2, col3 = st.columns(3)
-        is_sp = col1.toggle("Straightpull?", value=True, key="calc_is_sp")
-        holes = col2.number_input("Hole Count", value=int(rd.get('holes', 24)), key="calc_h_count")
-        cross = col3.selectbox("Crosses", [0,1,2,3,4], index=2, key="calc_x_count")
-        
-        l_len = calculate_spoke(rd.get('erd',0), hd.get('fd_l',0), hd.get('os_l',0), holes, cross, is_sp, hd.get('sp_off_l',0))
-        r_len = calculate_spoke(rd.get('erd',0), hd.get('fd_r',0), hd.get('os_r',0), holes, cross, is_sp, hd.get('sp_off_r',0))
-        
-        st.metric("Left Spoke", f"{l_len} mm")
-        st.metric("Right Spoke", f"{r_len} mm")
-        
-        target = st.radio("Stage results for:", ["Front Wheel", "Rear Wheel"], horizontal=True, key="calc_target")
-        if st.button("💾 Stage Data", key="calc_stage_btn", use_container_width=True):
-            if target == "Front Wheel": st.session_state.build_stage.update({'f_rim': r_sel, 'f_hub': h_sel, 'f_l': l_len, 'f_r': r_len})
-            else: st.session_state.build_stage.update({'r_rim': r_sel, 'r_hub': h_sel, 'r_l': l_len, 'r_r': r_len})
-            st.success(f"Staged {target}!")
+    st.header("📜 Proven Recipe Archive")
+    df_recipes = fetch_data("spoke_db", "combo_id")
+    if not df_recipes.empty:
+        r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
+        if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
+        st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
 
 # --- TAB 3: REGISTER BUILD ---
 with tabs[2]:
     st.header("📝 Register New Build")
-    with st.form("reg_form_v17_6"):
+    st.caption("Enter spoke lengths manually from your preferred calculator.")
+    with st.form("reg_form_v17_7"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
         with cf:
-            st.subheader("Front")
-            fr = st.text_input("Rim", value=st.session_state.build_stage['f_rim'], key="reg_fr")
-            fh = st.text_input("Hub", value=st.session_state.build_stage['f_hub'], key="reg_fh")
-            fl, frr = st.number_input("L-Len", value=st.session_state.build_stage['f_l']), st.number_input("R-Len", value=st.session_state.build_stage['f_r'])
+            st.subheader("Front Wheel")
+            fr_rim = st.selectbox("Rim", df_rims['label'] if not df_rims.empty else ["Manual Entry"], key="reg_fr_rim")
+            fr_hub = st.selectbox("Hub", df_hubs['label'] if not df_hubs.empty else ["Manual Entry"], key="reg_fr_hub")
+            fl_len = st.number_input("Left Spoke Length (mm)", step=0.1, format="%.1f")
+            fr_len = st.number_input("Right Spoke Length (mm)", step=0.1, format="%.1f")
         with cr:
-            st.subheader("Rear")
-            rr = st.text_input("Rim", value=st.session_state.build_stage['r_rim'], key="reg_rr")
-            # Fixed the Attribute Error here
-            rh_val = st.session_state.build_stage['r_hub'] if st.session_state.build_stage['r_hub'] else ''
-            rh = st.text_input("Hub", value=rh_val, key="reg_rh")
-            rl, rrr = st.number_input("L-Len ", value=st.session_state.build_stage['r_l']), st.number_input("R-Len ", value=st.session_state.build_stage['r_r'])
+            st.subheader("Rear Wheel")
+            rr_rim = st.selectbox("Rim ", df_rims['label'] if not df_rims.empty else ["Manual Entry"], key="reg_rr_rim")
+            rr_hub = st.selectbox("Hub ", df_hubs['label'] if not df_hubs.empty else ["Manual Entry"], key="reg_rr_hub")
+            rl_len = st.number_input("Left Spoke Length (mm) ", step=0.1, format="%.1f")
+            rr_len = st.number_input("Right Spoke Length (mm) ", step=0.1, format="%.1f")
         
-        if st.form_submit_button("🚀 Finalize Build"):
-            if cust: 
-                payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", 
-                           "f_rim": fr, "f_hub": fh, "f_l": fl, "f_r": frr, "r_rim": rr, "r_hub": rh, "r_l": rl, "r_r": rrr}
+        st.divider()
+        sc1, sc2 = st.columns(2)
+        spk = sc1.selectbox("Spoke Model", df_spokes['label'] if not df_spokes.empty else ["Std"])
+        nip = sc2.selectbox("Nipple Model", df_nipples['label'] if not df_nipples.empty else ["Std"])
+        notes = st.text_area("Build Notes")
+        
+        if st.form_submit_button("🚀 Finalize & Register"):
+            if cust:
+                payload = {
+                    "customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), 
+                    "status": "Order Received", "invoice_url": inv,
+                    "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len,
+                    "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
+                    "spoke": spk, "nipple": nip, "notes": notes
+                }
                 base.table("builds").create(payload)
-                st.session_state.build_stage = {'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0, 'r_rim': '', 'r_hub': '', 'r_l': 0.0, 'r_r': 0.0}
-                st.cache_data.clear(); st.success("Registered!"); st.rerun()
+                st.cache_data.clear(); st.success("Build registered successfully!"); st.rerun()
+            else: st.error("Customer name is required.")
 
 # --- TAB 4: LIBRARY ---
 with tabs[3]:
