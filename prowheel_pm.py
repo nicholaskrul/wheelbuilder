@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v17.7", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v17.8", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -54,8 +54,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v17.7")
-st.caption("Workshop Command Center | Streamlined Manual Intake")
+st.title("🚲 Wheelbuilder Lab v17.8")
+st.caption("Workshop Command Center | Professional External Integration")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -113,8 +113,12 @@ with tabs[1]:
 # --- TAB 3: REGISTER BUILD ---
 with tabs[2]:
     st.header("📝 Register New Build")
-    st.caption("Enter spoke lengths manually from your preferred calculator.")
-    with st.form("reg_form_v17_7"):
+    
+    # EXTERNAL CALCULATOR INTEGRATION
+    st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
+    st.divider()
+    
+    with st.form("reg_form_v17_8"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
