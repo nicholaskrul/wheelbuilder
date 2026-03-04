@@ -1,11 +1,11 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import math
 from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.3", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -14,7 +14,7 @@ try:
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
 except Exception:
-    st.error("❌ Airtable Secrets Error: Ensure keys are in Streamlit Secrets.")
+    st.error("❌ Airtable Connection Error: Check your Streamlit Secrets.")
     st.stop()
 
 @st.cache_data(ttl=300)
@@ -56,8 +56,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.1")
-st.caption("Workshop Command Center | Manual Spoke Intake & Auto-Recipe Archive")
+st.title("🚲 Wheelbuilder Lab v18.3")
+st.caption("Workshop Command Center | Resilient Pipeline & Manual Intake")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -66,8 +66,8 @@ with tabs[0]:
     c_sync1, c_sync2 = st.columns([5, 1])
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
     with c_sync2:
-        if st.button("🔄 Sync Data", key="global_sync", use_container_width=True):
-            st.cache_data.clear(); st.toast("Synced with Airtable!"); st.rerun()
+        if st.button("🔄 Sync", key="global_sync", use_container_width=True):
+            st.cache_data.clear(); st.toast("Synced!"); st.rerun()
     
     df_builds = fetch_data("builds", "customer")
     df_rims = fetch_data("rims", "rim")
@@ -76,68 +76,86 @@ with tabs[0]:
     df_nipples = fetch_data("nipples", "nipple")
     
     if not df_builds.empty:
-        search = st.text_input("🔍 Search Customer", key="main_search")
-        f_df = df_builds[df_builds['label'].str.contains(search, case=False, na=False)] if search else df_builds
+        # --- RESILIENT BUCKETING LOGIC ---
+        # fillna ensures that if a record lacks a status, it defaults to 'Order Received' instead of crashing
+        active_mask = df_builds['status'].fillna("Order Received") != "Complete"
+        active_builds = df_builds[active_mask].sort_values('id', ascending=False)
+        completed_builds = df_builds[~active_mask].sort_values('id', ascending=False)
+
+        # 📊 Status Summary Bar
+        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        c_m1.metric("Active Jobs", len(active_builds))
+        c_m2.metric("In Progress", len(active_builds[active_builds['status'] == "Building"]))
+        c_m3.metric("Awaiting Parts", len(active_builds[active_builds['status'] == "Parts Received"]))
+        c_m4.metric("Archived", len(completed_builds))
         
-        for _, row in f_df.sort_values('id', ascending=False).iterrows():
+        search = st.text_input("🔍 Search Active Customers", key="main_search")
+        if search:
+            active_builds = active_builds[active_builds['label'].str.contains(search, case=False, na=False)]
+
+        st.write("### 🛠️ On the Bench")
+        if active_builds.empty:
+            st.info("No active builds matching your search.")
+        
+        for _, row in active_builds.iterrows():
             # Get Hardware Weights
             spk_data = get_comp_data(df_spokes, row.get('spoke'))
             nip_data = get_comp_data(df_nipples, row.get('nipple'))
-            u_spk = float(spk_data.get('weight', 0))
-            u_nip = float(nip_data.get('weight', 0))
+            u_spk, u_nip = float(spk_data.get('weight', 0)), float(nip_data.get('weight', 0))
 
             # Weight Anatomy: Front
-            f_res = {"total": 0.0, "exists": False, "rim": 0, "hub": 0, "spk_t": 0, "nip_t": 0}
+            f_res = {"total": 0.0, "exists": False, "rim": 0, "hub": 0}
             if row.get('f_rim'):
-                frd = get_comp_data(df_rims, row.get('f_rim'))
-                fhd = get_comp_data(df_hubs, row.get('f_hub'))
-                h_count = int(frd.get('holes', 0))
-                f_res.update({
-                    "exists": True, "rim": float(frd.get('weight', 0)), "hub": float(fhd.get('weight', 0)),
-                    "spk_t": h_count * u_spk, "nip_t": h_count * u_nip
-                })
-                f_res["total"] = f_res["rim"] + f_res["hub"] + f_res["spk_t"] + f_res["nip_t"]
+                frd, fhd = get_comp_data(df_rims, row.get('f_rim')), get_comp_data(df_hubs, row.get('f_hub'))
+                h = int(frd.get('holes', 0))
+                f_res.update({"exists": True, "rim": float(frd.get('weight', 0)), "hub": float(fhd.get('weight', 0))})
+                f_res["total"] = f_res["rim"] + f_res["hub"] + (h * u_spk) + (h * u_nip)
 
             # Weight Anatomy: Rear
-            r_res = {"total": 0.0, "exists": False, "rim": 0, "hub": 0, "spk_t": 0, "nip_t": 0}
+            r_res = {"total": 0.0, "exists": False, "rim": 0, "hub": 0}
             if row.get('r_rim'):
-                rrd = get_comp_data(df_rims, row.get('r_rim'))
-                rhd = get_comp_data(df_hubs, row.get('r_hub'))
-                h_count = int(rrd.get('holes', 0))
-                r_res.update({
-                    "exists": True, "rim": float(rrd.get('weight', 0)), "hub": float(rhd.get('weight', 0)),
-                    "spk_t": h_count * u_spk, "nip_t": h_count * u_nip
-                })
-                r_res["total"] = r_res["rim"] + r_res["hub"] + r_res["spk_t"] + r_res["nip_t"]
+                rrd, rhd = get_comp_data(df_rims, row.get('r_rim')), get_comp_data(df_hubs, row.get('r_hub'))
+                h = int(rrd.get('holes', 0))
+                r_res.update({"exists": True, "rim": float(rrd.get('weight', 0)), "hub": float(rhd.get('weight', 0))})
+                r_res["total"] = r_res["rim"] + r_res["hub"] + (h * u_spk) + (h * u_nip)
 
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', '---')})"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.markdown("**🔘 FRONT**")
                     if f_res["exists"]:
                         st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
-                        st.metric("Total", f"{int(f_res['total'])}g")
-                        st.caption(f"R: {int(f_res['rim'])}g | H: {int(f_res['hub'])}g")
+                        st.metric("Weight", f"{int(f_res['total'])}g")
                 with c2:
                     st.markdown("**🔘 REAR**")
                     if r_res["exists"]:
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
-                        st.metric("Total", f"{int(r_res['total'])}g")
-                        st.caption(f"R: {int(r_res['rim'])}g | H: {int(r_res['hub'])}g")
+                        st.metric("Weight", f"{int(r_res['total'])}g")
                 with c3:
-                    st.metric("📦 SET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
-                    cur_stat = row.get('status', 'Order Received')
-                    new_stat = st.selectbox("Status", ["Order Received", "Parts Received", "Building", "Complete"], key=f"st_{row['id']}", index=["Order Received", "Parts Received", "Building", "Complete"].index(cur_stat))
-                    if new_stat != cur_stat:
-                        base.table("builds").update(row['id'], {"status": new_stat}); st.cache_data.clear(); st.rerun()
-
-                    with st.popover("📝 Update Details"):
+                    st.metric("📦 SET", f"{int(f_res['total'] + r_res['total'])}g")
+                    cur = row.get('status', 'Order Received')
+                    opts = ["Order Received", "Parts Received", "Building", "Complete"]
+                    new = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
+                    if new != cur:
+                        base.table("builds").update(row['id'], {"status": new}); st.cache_data.clear(); st.rerun()
+                    
+                    with st.popover("📝 Details / Serial #"):
                         fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
                         rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
                         nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
                         if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
-                            base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            st.cache_data.clear(); st.rerun()
+                            base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt}); st.cache_data.clear(); st.rerun()
+
+        # --- COMPLETED ARCHIVE ---
+        st.divider()
+        with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
+            if not completed_builds.empty:
+                for _, row in completed_builds.iterrows():
+                    st.write(f"✅ **{row.get('customer')}** — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}")
+                    if st.button("Re-open for Bench", key=f"re_{row['id']}"):
+                        base.table("builds").update(row['id'], {"status": "Building"}); st.cache_data.clear(); st.rerun()
+            else:
+                st.write("No archived builds found.")
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
@@ -153,23 +171,20 @@ with tabs[2]:
     st.header("📝 Register New Build")
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
-    
-    with st.form("reg_form_v18_1"):
+    with st.form("reg_form_v18_3"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
         with cf:
             st.subheader("Front Wheel")
-            fr_rim = st.selectbox("Rim", df_rims['label'] if not df_rims.empty else ["Manual Entry"], key="reg_fr_rim")
-            fr_hub = st.selectbox("Hub", df_hubs['label'] if not df_hubs.empty else ["Manual Entry"], key="reg_fr_hub")
-            fl_len = st.number_input("Left Spoke (mm)", step=0.1, format="%.1f")
-            fr_len = st.number_input("Right Spoke (mm)", step=0.1, format="%.1f")
+            fr_rim = st.selectbox("Rim", df_rims['label'] if not df_rims.empty else ["Manual"], key="reg_fr_rim")
+            fr_hub = st.selectbox("Hub", df_hubs['label'] if not df_hubs.empty else ["Manual"], key="reg_fr_hub")
+            fl_len, fr_len = st.number_input("Left Spoke (mm)", step=0.1), st.number_input("Right Spoke (mm)", step=0.1)
         with cr:
             st.subheader("Rear Wheel")
-            rr_rim = st.selectbox("Rim ", df_rims['label'] if not df_rims.empty else ["Manual Entry"], key="reg_rr_rim")
-            rr_hub = st.selectbox("Hub ", df_hubs['label'] if not df_hubs.empty else ["Manual Entry"], key="reg_rr_hub")
-            rl_len = st.number_input("Left Spoke (mm) ", step=0.1, format="%.1f")
-            rr_len = st.number_input("Right Spoke (mm) ", step=0.1, format="%.1f")
+            rr_rim = st.selectbox("Rim ", df_rims['label'] if not df_rims.empty else ["Manual"], key="reg_rr_rim")
+            rr_hub = st.selectbox("Hub ", df_hubs['label'] if not df_hubs.empty else ["Manual"], key="reg_rr_hub")
+            rl_len, rr_len = st.number_input("Left Spoke (mm) ", step=0.1), st.number_input("Right Spoke (mm) ", step=0.1)
         
         st.divider()
         sc1, sc2 = st.columns(2)
@@ -177,56 +192,38 @@ with tabs[2]:
         nip = sc2.selectbox("Nipple Model", df_nipples['label'] if not df_nipples.empty else ["Std"])
         notes = st.text_area("Build Notes")
         
-        if st.form_submit_button("🚀 Finalize & Register"):
+        if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
-                # 1. Register Build
-                payload = {
-                    "customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), 
-                    "status": "Order Received", "invoice_url": inv,
-                    "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len,
-                    "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
-                    "spoke": spk, "nipple": nip, "notes": notes
-                }
-                base.table("builds").create(payload)
+                # 1. Register Build entry
+                p = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv,
+                     "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
+                base.table("builds").create(p)
 
-                # 2. Archiving Logic (Loops through front then rear)
+                # 2. Recipe Archive
                 db_table = base.table("spoke_db")
                 for rim, hub, l, r in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                     if rim and hub and l > 0:
-                        rd_id = df_rims[df_rims['label'] == rim]['id'].values[0]
-                        hd_id = df_hubs[df_hubs['label'] == hub]['id'].values[0]
-                        
-                        fingerprint = f"{rim} | {hub}"
-                        escaped_fp = fingerprint.replace("'", "\\'")
-                        search_f = f"{{combo_id}}='{escaped_fp}'"
-                        
-                        existing = db_table.all(formula=search_f)
-                        if existing:
-                            hits = existing[0]['fields'].get('build_count', 1)
-                            db_table.update(existing[0]['id'], {"build_count": hits + 1, "len_l": l, "len_r": r})
-                        else:
-                            db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": r, "build_count": 1})
-                
-                st.cache_data.clear(); st.success("Build registered and Recipes updated!"); st.rerun()
+                        rd_id, hd_id = df_rims[df_rims['label'] == rim]['id'].values[0], df_hubs[df_hubs['label'] == hub]['id'].values[0]
+                        fp = f"{rim} | {hub}"
+                        exist = db_table.all(formula=f"{{combo_id}}='{fp.replace(\"'\", \"\\\\'\")}'")
+                        if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": r})
+                        else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": r, "build_count": 1})
+                st.cache_data.clear(); st.success("Registered and Recipe Archived!"); st.rerun()
 
 # --- TAB 4: LIBRARY ---
 with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add_v18_1"):
+        with st.form("quick_add_v18_3"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
-            p_load = {}
-            if cat == "Rim":
-                p_load = {"rim": name, "erd": c1.number_input("ERD", step=0.1), "holes": c2.number_input("Holes", step=1), "weight": st.number_input("Weight")}
-            elif cat == "Hub":
-                p_load = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
-            elif cat in ["Spoke", "Nipple"]:
-                p_load = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
+            p = {}
+            if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD", step=0.1), "holes": c2.number_input("Holes", step=1), "weight": st.number_input("Weight")}
+            elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
+            elif cat in ["Spoke", "Nipple"]: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
             if st.form_submit_button("Save to Database"):
-                if name:
-                    base.table(f"{cat.lower()}s").create(p_load); st.cache_data.clear(); st.success("Added!"); st.rerun()
+                if name: base.table(f"{cat.lower()}s").create(p); st.cache_data.clear(); st.success("Added!"); st.rerun()
 
     v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(v_cat, "id")
