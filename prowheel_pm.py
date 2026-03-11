@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.4", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.5", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -56,8 +56,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.4")
-st.caption("Workshop Command Center | Visual Pipeline & Manual Spoke Intake")
+st.title("🚲 Wheelbuilder Lab v18.5")
+st.caption("Workshop Command Center | Alphabetized Library & Visual Pipeline")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -93,7 +93,6 @@ with tabs[0]:
 
         st.write("### 🛠️ On the Bench")
         for _, row in active_builds.iterrows():
-            # Weight calculation components
             spk_data = get_comp_data(df_spokes, row.get('spoke'))
             nip_data = get_comp_data(df_nipples, row.get('nipple'))
             u_spk, u_nip = float(spk_data.get('weight', 0)), float(nip_data.get('weight', 0))
@@ -120,14 +119,14 @@ with tabs[0]:
                         st.markdown(f"**{row.get('f_rim')}**")
                         st.caption(f"{row.get('f_hub')}")
                         st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
-                        st.metric("Total Weight", f"{int(f_res['total'])}g")
+                        st.metric("Weight", f"{int(f_res['total'])}g")
                 with c2:
                     st.markdown("**🔘 REAR**")
                     if r_res["exists"]:
                         st.markdown(f"**{row.get('r_rim')}**")
                         st.caption(f"{row.get('r_hub')}")
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
-                        st.metric("Total Weight", f"{int(r_res['total'])}g")
+                        st.metric("Weight", f"{int(r_res['total'])}g")
                 with c3:
                     st.metric("📦 SET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
                     cur = row.get('status', 'Order Received')
@@ -148,7 +147,7 @@ with tabs[0]:
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
             if not completed_builds.empty:
                 for _, row in completed_builds.iterrows():
-                    st.write(f"✅ **{row.get('customer')}** — {row.get('date')} — {row.get('f_rim')} / {row.get('r_rim')}")
+                    st.write(f"✅ **{row.get('customer')}** — {row.get('f_rim')} | {row.get('r_rim')}")
                     if st.button("Re-open Build", key=f"re_{row['id']}"):
                         base.table("builds").update(row['id'], {"status": "Building"}); st.cache_data.clear(); st.rerun()
 
@@ -159,6 +158,8 @@ with tabs[1]:
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
+        # Alphabetize recipes by name
+        df_recipes = df_recipes.sort_values('label', key=lambda x: x.str.lower())
         st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
 
 # --- TAB 3: REGISTER BUILD ---
@@ -166,46 +167,49 @@ with tabs[2]:
     st.header("📝 Register New Build")
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
-    with st.form("reg_form_v18_4"):
+    
+    # Pre-sort Rim and Hub lists alphabetically for the dropdowns
+    rim_list = sorted(df_rims['label'].tolist(), key=str.lower) if not df_rims.empty else ["Manual"]
+    hub_list = sorted(df_hubs['label'].tolist(), key=str.lower) if not df_hubs.empty else ["Manual"]
+    spoke_list = sorted(df_spokes['label'].tolist(), key=str.lower) if not df_spokes.empty else ["Std"]
+    nipple_list = sorted(df_nipples['label'].tolist(), key=str.lower) if not df_nipples.empty else ["Std"]
+
+    with st.form("reg_form_v18_5"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
         with cf:
             st.subheader("Front Wheel")
-            fr_rim = st.selectbox("Rim", df_rims['label'] if not df_rims.empty else ["Manual"], key="reg_fr_rim")
-            fr_hub = st.selectbox("Hub", df_hubs['label'] if not df_hubs.empty else ["Manual"], key="reg_fr_hub")
+            fr_rim = st.selectbox("Rim", rim_list, key="reg_fr_rim")
+            fr_hub = st.selectbox("Hub", hub_list, key="reg_fr_hub")
             fl_len, fr_len = st.number_input("Left Spoke (mm)", step=0.1), st.number_input("Right Spoke (mm)", step=0.1)
         with cr:
             st.subheader("Rear Wheel")
-            rr_rim = st.selectbox("Rim ", df_rims['label'] if not df_rims.empty else ["Manual"], key="reg_rr_rim")
-            rr_hub = st.selectbox("Hub ", df_hubs['label'] if not df_hubs.empty else ["Manual"], key="reg_rr_hub")
+            rr_rim = st.selectbox("Rim ", rim_list, key="reg_rr_rim")
+            rr_hub = st.selectbox("Hub ", hub_list, key="reg_rr_hub")
             rl_len, rr_len = st.number_input("Left Spoke (mm) ", step=0.1), st.number_input("Right Spoke (mm) ", step=0.1)
         
         st.divider()
         sc1, sc2 = st.columns(2)
-        spk = sc1.selectbox("Spoke Model", df_spokes['label'] if not df_spokes.empty else ["Std"])
-        nip = sc2.selectbox("Nipple Model", df_nipples['label'] if not df_nipples.empty else ["Std"])
+        spk = sc1.selectbox("Spoke Model", spoke_list)
+        nip = sc2.selectbox("Nipple Model", nipple_list)
         notes = st.text_area("Build Notes")
         
-        if st.form_submit_button("🚀 Finalize & Register"):
+        if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
-                # 1. Register Build Entry
                 payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv,
                            "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
-                # 2. Recipe Archive Entry
+                # Recipe Archiving
                 db_table = base.table("spoke_db")
                 for rim, hub, l, r in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                     if rim and hub and l > 0:
                         rd_id, hd_id = df_rims[df_rims['label'] == rim]['id'].values[0], df_hubs[df_hubs['label'] == hub]['id'].values[0]
                         fingerprint = f"{rim} | {hub}"
-                        
-                        # Resilient search formula for Airtable
                         clean_fp = fingerprint.replace("'", "\\'")
                         formula = f"{{combo_id}}='{clean_fp}'"
-                        
                         exist = db_table.all(formula=formula)
                         if exist:
                             hits = exist[0]['fields'].get('build_count', 1)
@@ -218,17 +222,21 @@ with tabs[2]:
 # --- TAB 4: LIBRARY ---
 with tabs[3]:
     st.header("📦 Library Management")
-    with st.expander("➕ Add Component"):
+    with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add"):
+        with st.form("quick_add_v18_5"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
             p = {}
             if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD", step=0.1), "holes": c2.number_input("Holes", step=1), "weight": st.number_input("Weight")}
             elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
             elif cat in ["Spoke", "Nipple"]: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
-            if st.form_submit_button("Save"):
-                if name: base.table(f"{cat.lower()}s").create(p); st.cache_data.clear(); st.rerun()
-    v_cat = st.radio("Inventory View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
+            if st.form_submit_button("Save to Database"):
+                if name: base.table(f"{cat.lower()}s").create(p); st.cache_data.clear(); st.success("Added!"); st.rerun()
+    
+    v_cat = st.radio("Library View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(v_cat, "id")
-    if not df_l.empty: st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True, hide_index=True)
+    if not df_l.empty:
+        # ALPHABETIZE Library View
+        df_l = df_l.sort_values('label', key=lambda x: x.str.lower())
+        st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True, hide_index=True)
