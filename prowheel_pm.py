@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
-import math
+import time
 from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.6", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.7", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -17,14 +17,15 @@ except Exception as e:
     st.error(f"❌ Airtable Secrets Error: {e}")
     st.stop()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def fetch_data(table_name, label_col):
-    """Fetches records with enhanced error reporting for diagnostics."""
+    """Fetches data with a slight delay to prevent 429 rate-limiting."""
     try:
+        # Rate-limiting safety: Respect Airtable's 5 req/sec limit
+        time.sleep(0.25) 
         table = base.table(table_name)
         records = table.all()
-        if not records: 
-            return pd.DataFrame()
+        if not records: return pd.DataFrame()
         data = []
         for rec in records:
             fields = rec['fields']
@@ -33,17 +34,17 @@ def fetch_data(table_name, label_col):
                 fields['label'] = str(fields[label_col]).strip()
             data.append(fields)
         df = pd.DataFrame(data)
-        # Clean up Airtable lookup/link arrays
+        # Clean up Airtable lookup/link arrays (flatten lists to strings)
         for col in df.columns:
             df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
         return df
     except Exception as e:
-        # v18.6 change: Display the actual error instead of failing silently
         st.sidebar.error(f"Error fetching '{table_name}': {e}")
         return pd.DataFrame()
 
 # --- 3. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
+    """Retrieves component dictionary from label string."""
     if df.empty or not label: return {}
     target = str(label).strip().lower()
     df_norm = df.copy()
@@ -52,6 +53,7 @@ def get_comp_data(df, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 4. SESSION STATE ---
+# Flattened session state structure to prevent AttributeErrors
 if 'build_stage' not in st.session_state:
     st.session_state.build_stage = {
         'f_rim': '', 'f_hub': '', 'f_l': 0.0, 'f_r': 0.0,
@@ -59,8 +61,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.6")
-st.caption("Workshop Command Center | Diagnostic Build")
+st.title("🚲 Wheelbuilder Lab v18.7")
+st.caption("Workshop Command Center | Optimized API Logic & Visual Tracking")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -70,35 +72,33 @@ with tabs[0]:
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
     with c_sync2:
         if st.button("🔄 Sync", key="global_sync", use_container_width=True):
-            st.cache_data.clear(); st.toast("Refreshing data..."); st.rerun()
+            st.cache_data.clear(); st.toast("Refreshing Data..."); st.rerun()
     
-    # Fetch core dataframes
     df_builds = fetch_data("builds", "customer")
     df_rims = fetch_data("rims", "rim")
     df_hubs = fetch_data("hubs", "hub")
     df_spokes = fetch_data("spokes", "spoke")
     df_nipples = fetch_data("nipples", "nipple")
     
-    if df_builds.empty:
-        st.warning("⚠️ No data found in 'builds' table. Check Airtable table names or API permissions.")
-    else:
-        # Smart Bucketing
+    if not df_builds.empty:
+        # Resilient bucketing for Active vs Complete builds
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         active_builds = df_builds[active_mask].sort_values('id', ascending=False)
         completed_builds = df_builds[~active_mask].sort_values('id', ascending=False)
 
-        # 📊 Status Metrics
+        # 📊 Status Metrics Summary
         c_m1, c_m2, c_m3 = st.columns(3)
         c_m1.metric("Active Jobs", len(active_builds))
         c_m2.metric("In Progress", len(active_builds[active_builds['status'] == "Building"]))
         c_m3.metric("Archived", len(completed_builds))
-        
+
         search = st.text_input("🔍 Search Active Customers", key="main_search")
         if search:
             active_builds = active_builds[active_builds['label'].str.contains(search, case=False, na=False)]
 
         st.write("### 🛠️ On the Bench")
         for _, row in active_builds.iterrows():
+            # Get Hardware Weights for the specific build
             spk_data = get_comp_data(df_spokes, row.get('spoke'))
             nip_data = get_comp_data(df_nipples, row.get('nipple'))
             u_spk, u_nip = float(spk_data.get('weight', 0)), float(nip_data.get('weight', 0))
@@ -117,7 +117,7 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * u_spk) + (h * u_nip)
 
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')} ({row.get('date', '---')})"):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.markdown("**🔘 FRONT**")
@@ -134,7 +134,7 @@ with tabs[0]:
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                         st.metric("Weight", f"{int(r_res['total'])}g")
                 with c3:
-                    st.metric("📦 SET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
+                    st.metric("📦 SET", f"{int(f_res['total'] + r_res['total'])}g")
                     cur = row.get('status', 'Order Received')
                     opts = ["Order Received", "Parts Received", "Building", "Complete"]
                     new = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
@@ -145,7 +145,7 @@ with tabs[0]:
                         fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
                         rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
                         nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
-                        if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
+                        if st.button("Save", key=f"btn_{row['id']}", use_container_width=True):
                             base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt}); st.cache_data.clear(); st.rerun()
 
         # --- COMPLETED ARCHIVE ---
@@ -164,6 +164,7 @@ with tabs[1]:
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
+        # Alphabetical sorting for recipe list
         df_recipes = df_recipes.sort_values('label', key=lambda x: x.str.lower())
         st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
 
@@ -173,40 +174,42 @@ with tabs[2]:
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
     
+    # Pre-sorted lists for dropdowns
     rim_list = sorted(df_rims['label'].tolist(), key=str.lower) if not df_rims.empty else ["Manual"]
     hub_list = sorted(df_hubs['label'].tolist(), key=str.lower) if not df_hubs.empty else ["Manual"]
     spoke_list = sorted(df_spokes['label'].tolist(), key=str.lower) if not df_spokes.empty else ["Std"]
     nipple_list = sorted(df_nipples['label'].tolist(), key=str.lower) if not df_nipples.empty else ["Std"]
 
-    with st.form("reg_form_v18_6"):
+    with st.form("reg_form_v18_7"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
         with cf:
-            st.subheader("Front Wheel")
+            st.subheader("Front")
             fr_rim = st.selectbox("Rim", rim_list, key="reg_fr_rim")
             fr_hub = st.selectbox("Hub", hub_list, key="reg_fr_hub")
-            fl_len, fr_len = st.number_input("Left Spoke (mm)", step=0.1), st.number_input("Right Spoke (mm)", step=0.1)
+            fl_len, fr_len = st.number_input("Left Spoke (mm)", step=0.1, format="%.1f"), st.number_input("Right Spoke (mm)", step=0.1, format="%.1f")
         with cr:
-            st.subheader("Rear Wheel")
+            st.subheader("Rear")
             rr_rim = st.selectbox("Rim ", rim_list, key="reg_rr_rim")
             rr_hub = st.selectbox("Hub ", hub_list, key="reg_rr_hub")
-            rl_len, rr_len = st.number_input("Left Spoke (mm) ", step=0.1), st.number_input("Right Spoke (mm) ", step=0.1)
+            rl_len, rr_len = st.number_input("Left Spoke (mm) ", step=0.1, format="%.1f"), st.number_input("Right Spoke (mm) ", step=0.1, format="%.1f")
         
         st.divider()
         sc1, sc2 = st.columns(2)
-        spk = sc1.selectbox("Spoke Model", spoke_list)
-        nip = sc2.selectbox("Nipple Model", nipple_list)
+        spk = sc1.selectbox("Spoke", spoke_list)
+        nip = sc2.selectbox("Nipple", nipple_list)
         notes = st.text_area("Build Notes")
         
         if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
+                # 1. Main Table creation
                 payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv,
                            "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
-                # Recipe Archiving logic
+                # 2. Recipe Archiving (Fixed Syntax with quote escaping)
                 db_table = base.table("spoke_db")
                 for rim, hub, l, r in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                     if rim and hub and l > 0:
@@ -214,6 +217,7 @@ with tabs[2]:
                         fingerprint = f"{rim} | {hub}"
                         clean_fp = fingerprint.replace("'", "\\'")
                         formula = f"{{combo_id}}='{clean_fp}'"
+                        
                         exist = db_table.all(formula=formula)
                         if exist:
                             hits = exist[0]['fields'].get('build_count', 1)
@@ -226,20 +230,21 @@ with tabs[2]:
 # --- TAB 4: LIBRARY ---
 with tabs[3]:
     st.header("📦 Library Management")
-    with st.expander("➕ Add New Component"):
+    with st.expander("➕ Add Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add_v18_6"):
+        with st.form("quick_add_v18_7"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
             p = {}
             if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD", step=0.1), "holes": c2.number_input("Holes", step=1), "weight": st.number_input("Weight")}
             elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
             elif cat in ["Spoke", "Nipple"]: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
-            if st.form_submit_button("Save to Database"):
-                if name: base.table(f"{cat.lower()}s").create(p); st.cache_data.clear(); st.success("Added!"); st.rerun()
+            if st.form_submit_button("Save to Library"):
+                if name: base.table(f"{cat.lower()}s").create(p); st.cache_data.clear(); st.rerun()
     
-    v_cat = st.radio("Library View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
+    v_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty:
+        # Sort library view alphabetically
         df_l = df_l.sort_values('label', key=lambda x: x.str.lower())
         st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True, hide_index=True)
