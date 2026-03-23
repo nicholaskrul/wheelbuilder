@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.5", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.6", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -13,17 +13,18 @@ try:
     AIRTABLE_BASE_ID = st.secrets["airtable"]["base_id"]
     api = Api(AIRTABLE_API_KEY)
     base = api.base(AIRTABLE_BASE_ID)
-except Exception:
-    st.error("❌ Airtable Connection Error: Check your Streamlit Secrets.")
+except Exception as e:
+    st.error(f"❌ Airtable Secrets Error: {e}")
     st.stop()
 
 @st.cache_data(ttl=300)
 def fetch_data(table_name, label_col):
-    """Fetches records and flattens Airtable list/link fields."""
+    """Fetches records with enhanced error reporting for diagnostics."""
     try:
         table = base.table(table_name)
         records = table.all()
-        if not records: return pd.DataFrame()
+        if not records: 
+            return pd.DataFrame()
         data = []
         for rec in records:
             fields = rec['fields']
@@ -32,15 +33,17 @@ def fetch_data(table_name, label_col):
                 fields['label'] = str(fields[label_col]).strip()
             data.append(fields)
         df = pd.DataFrame(data)
+        # Clean up Airtable lookup/link arrays
         for col in df.columns:
             df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
         return df
-    except Exception:
+    except Exception as e:
+        # v18.6 change: Display the actual error instead of failing silently
+        st.sidebar.error(f"Error fetching '{table_name}': {e}")
         return pd.DataFrame()
 
 # --- 3. ANALYTICS HELPERS ---
 def get_comp_data(df, label):
-    """Retrieves component dictionary from label string."""
     if df.empty or not label: return {}
     target = str(label).strip().lower()
     df_norm = df.copy()
@@ -56,8 +59,8 @@ if 'build_stage' not in st.session_state:
     }
 
 # --- 5. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.5")
-st.caption("Workshop Command Center | Alphabetized Library & Visual Pipeline")
+st.title("🚲 Wheelbuilder Lab v18.6")
+st.caption("Workshop Command Center | Diagnostic Build")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -67,15 +70,18 @@ with tabs[0]:
     with c_sync1: st.subheader("🏁 Workshop Pipeline")
     with c_sync2:
         if st.button("🔄 Sync", key="global_sync", use_container_width=True):
-            st.cache_data.clear(); st.toast("Synced!"); st.rerun()
+            st.cache_data.clear(); st.toast("Refreshing data..."); st.rerun()
     
+    # Fetch core dataframes
     df_builds = fetch_data("builds", "customer")
     df_rims = fetch_data("rims", "rim")
     df_hubs = fetch_data("hubs", "hub")
     df_spokes = fetch_data("spokes", "spoke")
     df_nipples = fetch_data("nipples", "nipple")
     
-    if not df_builds.empty:
+    if df_builds.empty:
+        st.warning("⚠️ No data found in 'builds' table. Check Airtable table names or API permissions.")
+    else:
         # Smart Bucketing
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         active_builds = df_builds[active_mask].sort_values('id', ascending=False)
@@ -158,7 +164,6 @@ with tabs[1]:
     if not df_recipes.empty:
         r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
         if r_search: df_recipes = df_recipes[df_recipes['label'].str.contains(r_search, case=False, na=False)]
-        # Alphabetize recipes by name
         df_recipes = df_recipes.sort_values('label', key=lambda x: x.str.lower())
         st.dataframe(df_recipes[['label', 'len_l', 'len_r', 'build_count']].rename(columns={'label': 'Recipe', 'len_l': 'L-Len', 'len_r': 'R-Len', 'build_count': 'Hits'}), use_container_width=True, hide_index=True)
 
@@ -168,13 +173,12 @@ with tabs[2]:
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
     
-    # Pre-sort Rim and Hub lists alphabetically for the dropdowns
     rim_list = sorted(df_rims['label'].tolist(), key=str.lower) if not df_rims.empty else ["Manual"]
     hub_list = sorted(df_hubs['label'].tolist(), key=str.lower) if not df_hubs.empty else ["Manual"]
     spoke_list = sorted(df_spokes['label'].tolist(), key=str.lower) if not df_spokes.empty else ["Std"]
     nipple_list = sorted(df_nipples['label'].tolist(), key=str.lower) if not df_nipples.empty else ["Std"]
 
-    with st.form("reg_form_v18_5"):
+    with st.form("reg_form_v18_6"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         cf, cr = st.columns(2)
@@ -202,7 +206,7 @@ with tabs[2]:
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
-                # Recipe Archiving
+                # Recipe Archiving logic
                 db_table = base.table("spoke_db")
                 for rim, hub, l, r in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                     if rim and hub and l > 0:
@@ -224,7 +228,7 @@ with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add_v18_5"):
+        with st.form("quick_add_v18_6"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
             p = {}
@@ -237,6 +241,5 @@ with tabs[3]:
     v_cat = st.radio("Library View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True, key="lib_view")
     df_l = fetch_data(v_cat, "id")
     if not df_l.empty:
-        # ALPHABETIZE Library View
         df_l = df_l.sort_values('label', key=lambda x: x.str.lower())
         st.dataframe(df_l.drop(columns=['id', 'label'], errors='ignore'), use_container_width=True, hide_index=True)
