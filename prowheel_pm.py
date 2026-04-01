@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.9", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.9.1", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -84,7 +84,7 @@ def get_comp_data(table_key, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 6. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.9")
+st.title("🚲 Wheelbuilder Lab v18.9.1")
 st.caption("Workshop Command Center | API Conservation Mode")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
@@ -157,7 +157,7 @@ with tabs[0]:
                     if new_s != cur:
                         # Update Cloud
                         base.table("builds").update(row['id'], {"status": new_s})
-                        # Update Local (No API Refresh needed)
+                        # Update Local
                         update_local_record("builds", row['id'], {"status": new_s})
                         st.toast(f"Status changed to {new_s}"); st.rerun()
                     
@@ -168,16 +168,19 @@ with tabs[0]:
                         if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
                             base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
                             update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            st.toast("Record updated locally and in cloud."); st.rerun()
+                            st.toast("Updated locally and in cloud."); st.rerun()
 
-        # --- ARCHIVE ---
+        # --- ARCHIVE (Fixed Variable Name Error) ---
         st.divider()
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
-            for _, row in archived.iterrows():
-                st.write(f"✅ **{row.get('customer')}** — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}")
-                if st.button("Re-open Build", key=f"re_{row['id']}"):
-                    base.table("builds").update(row['id'], {"status": "Building"})
-                    refresh_api(); st.rerun()
+            if not completed_builds.empty:
+                for _, row in completed_builds.iterrows():
+                    st.write(f"✅ **{row.get('customer')}** — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}")
+                    if st.button("Re-open Build", key=f"re_{row['id']}"):
+                        base.table("builds").update(row['id'], {"status": "Building"})
+                        refresh_api(); st.rerun()
+            else:
+                st.write("No archived builds.")
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
@@ -198,7 +201,7 @@ with tabs[2]:
     rim_opts = sorted(df_rims['label'].tolist(), key=str.lower) if not df_rims.empty else ["Manual"]
     hub_opts = sorted(df_hubs['label'].tolist(), key=str.lower) if not df_hubs.empty else ["Manual"]
 
-    with st.form("reg_form_v18_9"):
+    with st.form("reg_form_v18_9_1"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         c_f, c_r = st.columns(2)
@@ -244,7 +247,7 @@ with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add_v18_9"):
+        with st.form("quick_add_v18_9_1"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
             p = {}
@@ -256,7 +259,7 @@ with tabs[3]:
                     base.table(f"{cat.lower()}s").create(p)
                     refresh_api(); st.success("Added!"); st.rerun()
     
-    v_cat = st.radio("View:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
+    v_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
     df_lib = st.session_state.data[v_cat]
     if not df_lib.empty:
         st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
