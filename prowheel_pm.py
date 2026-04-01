@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.9.1", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.10", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -20,10 +20,6 @@ except Exception:
 # --- 3. THE OPTIMIZED DATA ENGINE (API SAVER) ---
 @st.cache_data(ttl=3600, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
-    """
-    Fetches all 6 tables in a single operation. 
-    TTL set to 1 hour to drastically reduce API calls.
-    """
     tables = {
         "builds": "customer", 
         "rims": "rim", 
@@ -47,11 +43,10 @@ def fetch_master_bundle():
                     fields['label'] = str(fields[label_col]).strip()
                 data.append(fields)
             df = pd.DataFrame(data)
-            # Flatten Airtable lookup/link arrays
             for col in df.columns:
                 df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
             bundle[table_name] = df
-            time.sleep(0.2) # Small gap to prevent 429 errors
+            time.sleep(0.2)
         except Exception:
             bundle[table_name] = pd.DataFrame()
     return bundle
@@ -61,15 +56,10 @@ if 'data' not in st.session_state:
     st.session_state.data = fetch_master_bundle()
 
 def refresh_api():
-    """Manual trigger to bypass the 1-hour cache and get fresh data."""
     st.cache_data.clear()
     st.session_state.data = fetch_master_bundle()
 
 def update_local_record(table_name, record_id, updates):
-    """
-    Mirror Airtable changes in the local session state.
-    This allows the UI to update without re-fetching all data from the API.
-    """
     df = st.session_state.data[table_name]
     if not df.empty and record_id in df['id'].values:
         for key, val in updates.items():
@@ -78,14 +68,15 @@ def update_local_record(table_name, record_id, updates):
 
 # --- 5. ANALYTICS HELPERS ---
 def get_comp_data(table_key, label):
+    if not label or label == "None": return {}
     df = st.session_state.data.get(table_key, pd.DataFrame())
-    if df.empty or not label: return {}
+    if df.empty: return {}
     match = df[df['label'].str.lower() == str(label).lower().strip()]
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 6. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.9.1")
-st.caption("Workshop Command Center | API Conservation Mode")
+st.title("🚲 Wheelbuilder Lab v18.10")
+st.caption("Workshop Command Center | Single-Wheel Build Support")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -98,36 +89,36 @@ with tabs[0]:
             refresh_api(); st.rerun()
 
     df_builds = st.session_state.data["builds"]
-    df_rims = st.session_state.data["rims"]
-    df_hubs = st.session_state.data["hubs"]
-    df_spokes = st.session_state.data["spokes"]
-    df_nipples = st.session_state.data["nipples"]
-
+    
     if df_builds.empty:
-        st.info("No active builds found. Start by registering a new build.")
+        st.info("No active builds found.")
     else:
-        # Resilient filtering for Active vs Complete
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         active_builds = df_builds[active_mask].sort_values('id', ascending=False)
         completed_builds = df_builds[~active_mask].sort_values('id', ascending=False)
 
         st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
         for _, row in active_builds.iterrows():
-            # Get Hardware Weights
+            # Spoke/Nipple data (handling "None")
             spk_data = get_comp_data("spokes", row.get('spoke'))
             nip_data = get_comp_data("nipples", row.get('nipple'))
-            u_spk, u_nip = float(spk_data.get('weight', 0)), float(nip_data.get('weight', 0))
+            u_spk = float(spk_data.get('weight', 0))
+            u_nip = float(nip_data.get('weight', 0))
 
             f_res = {"total": 0.0, "exists": False}
-            if row.get('f_rim'):
-                frd, fhd = get_comp_data("rims", row.get('f_rim')), get_comp_data("hubs", row.get('f_hub'))
+            # Only calculate if Rim is not "None"
+            if row.get('f_rim') and row.get('f_rim') != "None":
+                frd = get_comp_data("rims", row.get('f_rim'))
+                fhd = get_comp_data("hubs", row.get('f_hub'))
                 h = int(frd.get('holes', 0))
                 f_res.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0))})
                 f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
 
             r_res = {"total": 0.0, "exists": False}
-            if row.get('r_rim'):
-                rrd, rhd = get_comp_data("rims", row.get('r_rim')), get_comp_data("hubs", row.get('r_hub'))
+            # Only calculate if Rim is not "None"
+            if row.get('r_rim') and row.get('r_rim') != "None":
+                rrd = get_comp_data("rims", row.get('r_rim'))
+                rhd = get_comp_data("hubs", row.get('r_hub'))
                 h = int(rrd.get('holes', 0))
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
@@ -141,6 +132,8 @@ with tabs[0]:
                         st.caption(f"{row.get('f_hub')}")
                         st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
                         st.metric("Weight", f"{int(f_res['total'])}g")
+                    else:
+                        st.write("---")
                 with c2:
                     st.markdown("**🔘 REAR**")
                     if r_res["exists"]:
@@ -148,16 +141,18 @@ with tabs[0]:
                         st.caption(f"{row.get('r_hub')}")
                         st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                         st.metric("Weight", f"{int(r_res['total'])}g")
+                    else:
+                        st.write("---")
                 with c3:
-                    st.metric("📦 SET", f"{int(f_res['total'] + r_res['total'])}g")
+                    if f_res["exists"] or r_res["exists"]:
+                        st.metric("📦 SET", f"{int(f_res['total'] + r_res['total'])}g")
+                    
                     cur = row.get('status', 'Order Received')
                     opts = ["Order Received", "Parts Received", "Building", "Complete"]
                     new_s = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
                     
                     if new_s != cur:
-                        # Update Cloud
                         base.table("builds").update(row['id'], {"status": new_s})
-                        # Update Local
                         update_local_record("builds", row['id'], {"status": new_s})
                         st.toast(f"Status changed to {new_s}"); st.rerun()
                     
@@ -168,9 +163,8 @@ with tabs[0]:
                         if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
                             base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
                             update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            st.toast("Updated locally and in cloud."); st.rerun()
+                            st.toast("Record updated."); st.rerun()
 
-        # --- ARCHIVE (Fixed Variable Name Error) ---
         st.divider()
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
             if not completed_builds.empty:
@@ -179,8 +173,6 @@ with tabs[0]:
                     if st.button("Re-open Build", key=f"re_{row['id']}"):
                         base.table("builds").update(row['id'], {"status": "Building"})
                         refresh_api(); st.rerun()
-            else:
-                st.write("No archived builds.")
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
@@ -198,26 +190,29 @@ with tabs[2]:
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
     
-    rim_opts = sorted(df_rims['label'].tolist(), key=str.lower) if not df_rims.empty else ["Manual"]
-    hub_opts = sorted(df_hubs['label'].tolist(), key=str.lower) if not df_hubs.empty else ["Manual"]
+    # Adding "None" to the start of all selection lists
+    rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
+    hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
+    spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
+    nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-    with st.form("reg_form_v18_9_1"):
+    with st.form("reg_form_v18_10"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
         c_f, c_r = st.columns(2)
         with c_f:
-            st.subheader("Front")
+            st.subheader("Front Wheel")
             fr_rim = st.selectbox("Rim", rim_opts, key="reg_fr")
             fr_hub = st.selectbox("Hub", hub_opts, key="reg_fh")
             fl_len, fr_len = st.number_input("Left (mm)", step=0.1), st.number_input("Right (mm)", step=0.1)
         with c_r:
-            st.subheader("Rear")
+            st.subheader("Rear Wheel")
             rr_rim = st.selectbox("Rim ", rim_opts, key="reg_rr")
             rr_hub = st.selectbox("Hub ", hub_opts, key="reg_rh")
             rl_len, rr_len = st.number_input("Left (mm) ", step=0.1), st.number_input("Right (mm) ", step=0.1)
         
-        spk = st.selectbox("Spoke", sorted(df_spokes['label'].tolist()) if not df_spokes.empty else ["Std"])
-        nip = st.selectbox("Nipple", sorted(df_nipples['label'].tolist()) if not df_nipples.empty else ["Std"])
+        spk = st.selectbox("Spoke Model", spoke_opts)
+        nip = st.selectbox("Nipple Model", nipple_opts)
         notes = st.text_area("Build Notes")
         
         if st.form_submit_button("🚀 Finalize & Register Build"):
@@ -227,10 +222,13 @@ with tabs[2]:
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
-                # Recipe logic
+                # Recipe logic: Only create if components are NOT "None"
                 db_table = base.table("spoke_db")
+                df_rims = st.session_state.data["rims"]
+                df_hubs = st.session_state.data["hubs"]
+
                 for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
-                    if r and h and l > 0:
+                    if r != "None" and h != "None" and l > 0:
                         rd_id = df_rims[df_rims['label'] == r]['id'].values[0]
                         hd_id = df_hubs[df_hubs['label'] == h]['id'].values[0]
                         fp = f"{r} | {h}".replace("'", "\\'")
@@ -247,7 +245,7 @@ with tabs[3]:
     st.header("📦 Library Management")
     with st.expander("➕ Add New Component"):
         cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-        with st.form("quick_add_v18_9_1"):
+        with st.form("quick_add_v18_10"):
             name = st.text_input("Name")
             c1, c2 = st.columns(2)
             p = {}
