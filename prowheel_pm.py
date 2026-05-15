@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.10", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.11", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -75,8 +75,8 @@ def get_comp_data(table_key, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 6. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.10")
-st.caption("Workshop Command Center | Single-Wheel Build Support")
+st.title("🚲 Wheelbuilder Lab v18.11")
+st.caption("Workshop Command Center | Printable Parts Sheets Added")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -99,14 +99,13 @@ with tabs[0]:
 
         st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
         for _, row in active_builds.iterrows():
-            # Spoke/Nipple data (handling "None")
+            # Spoke/Nipple weight components
             spk_data = get_comp_data("spokes", row.get('spoke'))
             nip_data = get_comp_data("nipples", row.get('nipple'))
             u_spk = float(spk_data.get('weight', 0))
             u_nip = float(nip_data.get('weight', 0))
 
             f_res = {"total": 0.0, "exists": False}
-            # Only calculate if Rim is not "None"
             if row.get('f_rim') and row.get('f_rim') != "None":
                 frd = get_comp_data("rims", row.get('f_rim'))
                 fhd = get_comp_data("hubs", row.get('f_hub'))
@@ -115,7 +114,6 @@ with tabs[0]:
                 f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
 
             r_res = {"total": 0.0, "exists": False}
-            # Only calculate if Rim is not "None"
             if row.get('r_rim') and row.get('r_rim') != "None":
                 rrd = get_comp_data("rims", row.get('r_rim'))
                 rhd = get_comp_data("hubs", row.get('r_hub'))
@@ -156,14 +154,47 @@ with tabs[0]:
                         update_local_record("builds", row['id'], {"status": new_s})
                         st.toast(f"Status changed to {new_s}"); st.rerun()
                     
-                    with st.popover("📝 Details / Serial #"):
-                        fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
-                        rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
-                        nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
-                        if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
-                            base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                            st.toast("Record updated."); st.rerun()
+                    # Layout buttons inside expander columns
+                    c_btn1, c_btn2 = st.columns(2)
+                    with c_btn1:
+                        with st.popover("📝 Details"):
+                            fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
+                            rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                            nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                            if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
+                                base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
+                                update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
+                                st.toast("Record updated."); st.rerun()
+                    
+                    with c_btn2:
+                        # NEW FUNCTIONALITY: Printable Ticket Output Block
+                        with st.popover("🖨️ Parts Sheet"):
+                            # Format plain text sheet
+                            txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n"
+                            txt += f"====================================\n"
+                            txt += f"CUSTOMER  : {row.get('customer')}\n"
+                            txt += f"DATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\n"
+                            txt += f"SPOKE     : {row.get('spoke', 'None')}\n"
+                            txt += f"NIPPLE    : {row.get('nipple', 'None')}\n"
+                            txt += f"====================================\n\n"
+                            
+                            if row.get('f_rim') and row.get('f_rim') != "None":
+                                txt += f"🔘 FRONT WHEEL CONFIGURATION\n"
+                                txt += f"  - Rim: {row.get('f_rim')}\n"
+                                txt += f"  - Hub: {row.get('f_hub')}\n"
+                                txt += f"  - Left Spokes  : {row.get('f_l')} mm\n"
+                                txt += f"  - Right Spokes : {row.get('f_r')} mm\n\n"
+                                
+                            if row.get('r_rim') and row.get('r_rim') != "None":
+                                txt += f"🔘 REAR WHEEL CONFIGURATION\n"
+                                txt += f"  - Rim: {row.get('r_rim')}\n"
+                                txt += f"  - Hub: {row.get('r_hub')}\n"
+                                txt += f"  - Left Spokes  : {row.get('r_l')} mm\n"
+                                txt += f"  - Right Spokes : {row.get('r_r')} mm\n"
+                            txt += f"===================================="
+                            
+                            st.code(txt, language="text")
+                            st.download_button("📥 Download Text File", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
 
         st.divider()
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
@@ -190,7 +221,6 @@ with tabs[2]:
     st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
     st.divider()
     
-    # Adding "None" to the start of all selection lists
     rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
     hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
     spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
@@ -222,7 +252,6 @@ with tabs[2]:
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
-                # Recipe logic: Only create if components are NOT "None"
                 db_table = base.table("spoke_db")
                 df_rims = st.session_state.data["rims"]
                 df_hubs = st.session_state.data["hubs"]
