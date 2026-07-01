@@ -76,7 +76,7 @@ def get_comp_data(table_key, label):
 
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Delivery Address Tracking Added")
+st.caption("Workshop Command Center | Delivery Address Tracking Fixed")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -121,9 +121,12 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
-            # Small indicator if delivery info has been captured
-            has_addr = bool(str(row.get('delivery_address', '')).strip())
-            has_tracking = bool(str(row.get('tracking_link', '')).strip())
+            # --- CRITICAL FIX: Safe extraction and evaluation of data tracking links ---
+            addr_val = row.get('delivery_address')
+            track_val = row.get('tracking_link')
+
+            has_addr = isinstance(addr_val, str) and bool(addr_val.strip()) and addr_val.lower() not in ["none", "nan"]
+            has_tracking = isinstance(track_val, str) and bool(track_val.strip()) and track_val.lower() not in ["none", "nan"]
             addr_flag = " 📮" if (has_addr or has_tracking) else ""
 
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}{addr_flag}"):
@@ -172,31 +175,30 @@ with tabs[0]:
                                 st.toast("Record updated."); st.rerun()
 
                     with c_btn2:
-                        # NEW FUNCTIONALITY: Delivery Address + Tracking Link capture
                         with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
                             st.caption("Delivery address for this build")
-                            addr_val = st.text_area(
+                            new_addr_input = st.text_area(
                                 "Delivery Address",
-                                value=row.get('delivery_address', ''),
+                                value=str(addr_val).strip() if has_addr else "",
                                 placeholder="e.g.\n123 Example Street\nGeorge, Western Cape\n6529\nSouth Africa",
                                 height=120,
                                 key=f"addr_{row['id']}"
                             )
-                            track_val = st.text_input(
+                            new_track_input = st.text_input(
                                 "Courier Tracking Link",
-                                value=row.get('tracking_link', ''),
+                                value=str(track_val).strip() if has_tracking else "",
                                 placeholder="https://...",
                                 key=f"track_{row['id']}"
                             )
                             if has_tracking:
-                                st.link_button("🔗 Open Tracking Link", row.get('tracking_link'), use_container_width=True)
+                                st.link_button("🔗 Open Tracking Link", str(track_val).strip(), use_container_width=True)
+                                
                             if st.button("Save Delivery Info", key=f"addr_btn_{row['id']}", use_container_width=True):
-                                base.table("builds").update(row['id'], {"delivery_address": addr_val, "tracking_link": track_val})
-                                update_local_record("builds", row['id'], {"delivery_address": addr_val, "tracking_link": track_val})
+                                base.table("builds").update(row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
+                                update_local_record("builds", row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
                                 st.toast("Delivery info saved."); st.rerun()
                     
                     with c_btn3:
-                        # NEW FUNCTIONALITY: Printable Ticket Output Block
                         with st.popover("🖨️ Parts Sheet"):
                             # Format plain text sheet
                             txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n"
@@ -224,13 +226,13 @@ with tabs[0]:
                             if has_addr:
                                 txt += f"\n====================================\n"
                                 txt += f"📮 DELIVERY ADDRESS\n"
-                                txt += f"{row.get('delivery_address')}\n"
+                                txt += f"{str(addr_val).strip()}\n"
 
                             if has_tracking:
                                 if not has_addr:
                                     txt += f"\n====================================\n"
                                 txt += f"🔗 TRACKING LINK\n"
-                                txt += f"{row.get('tracking_link')}\n"
+                                txt += f"{str(track_val).strip()}\n"
 
                             txt += f"===================================="
                             
