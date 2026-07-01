@@ -76,7 +76,7 @@ def get_comp_data(table_key, label):
 
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Delivery Address Tracking Fixed")
+st.caption("Workshop Command Center | Alphabetical Sorting Enabled")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -94,8 +94,10 @@ with tabs[0]:
         st.info("No active builds found.")
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
-        active_builds = df_builds[active_mask].sort_values('id', ascending=False)
-        completed_builds = df_builds[~active_mask].sort_values('id', ascending=False)
+        
+        # --- UPDATED: Alphabetical, case-insensitive sorting by customer first name ---
+        active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
+        completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
         st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
         for _, row in active_builds.iterrows():
@@ -121,7 +123,6 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
-            # --- CRITICAL FIX: Safe extraction and evaluation of data tracking links ---
             addr_val = row.get('delivery_address')
             track_val = row.get('tracking_link')
 
@@ -200,7 +201,6 @@ with tabs[0]:
                     
                     with c_btn3:
                         with st.popover("🖨️ Parts Sheet"):
-                            # Format plain text sheet
                             txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n"
                             txt += f"====================================\n"
                             txt += f"CUSTOMER  : {row.get('customer')}\n"
