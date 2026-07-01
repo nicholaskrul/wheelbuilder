@@ -5,7 +5,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.11", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.12", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -75,8 +75,8 @@ def get_comp_data(table_key, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 # --- 6. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.11")
-st.caption("Workshop Command Center | Printable Parts Sheets Added")
+st.title("🚲 Wheelbuilder Lab v18.12")
+st.caption("Workshop Command Center | Delivery Address Tracking Added")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -121,7 +121,11 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
-            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}"):
+            # Small indicator if a delivery address has been captured
+            has_addr = bool(str(row.get('delivery_address', '')).strip())
+            addr_flag = " 📮" if has_addr else ""
+
+            with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}{addr_flag}"):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.markdown("**🔘 FRONT**")
@@ -155,7 +159,7 @@ with tabs[0]:
                         st.toast(f"Status changed to {new_s}"); st.rerun()
                     
                     # Layout buttons inside expander columns
-                    c_btn1, c_btn2 = st.columns(2)
+                    c_btn1, c_btn2, c_btn3 = st.columns(3)
                     with c_btn1:
                         with st.popover("📝 Details"):
                             fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
@@ -165,8 +169,24 @@ with tabs[0]:
                                 base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
                                 update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
                                 st.toast("Record updated."); st.rerun()
-                    
+
                     with c_btn2:
+                        # NEW FUNCTIONALITY: Delivery Address capture
+                        with st.popover(f"📮 Address{' ✅' if has_addr else ''}"):
+                            st.caption("Delivery address for this build")
+                            addr_val = st.text_area(
+                                "Delivery Address",
+                                value=row.get('delivery_address', ''),
+                                placeholder="e.g.\n123 Example Street\nGeorge, Western Cape\n6529\nSouth Africa",
+                                height=120,
+                                key=f"addr_{row['id']}"
+                            )
+                            if st.button("Save Address", key=f"addr_btn_{row['id']}", use_container_width=True):
+                                base.table("builds").update(row['id'], {"delivery_address": addr_val})
+                                update_local_record("builds", row['id'], {"delivery_address": addr_val})
+                                st.toast("Delivery address saved."); st.rerun()
+                    
+                    with c_btn3:
                         # NEW FUNCTIONALITY: Printable Ticket Output Block
                         with st.popover("🖨️ Parts Sheet"):
                             # Format plain text sheet
@@ -191,6 +211,12 @@ with tabs[0]:
                                 txt += f"  - Hub: {row.get('r_hub')}\n"
                                 txt += f"  - Left Spokes  : {row.get('r_l')} mm\n"
                                 txt += f"  - Right Spokes : {row.get('r_r')} mm\n"
+
+                            if has_addr:
+                                txt += f"\n====================================\n"
+                                txt += f"📮 DELIVERY ADDRESS\n"
+                                txt += f"{row.get('delivery_address')}\n"
+
                             txt += f"===================================="
                             
                             st.code(txt, language="text")
