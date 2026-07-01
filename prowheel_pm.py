@@ -121,9 +121,10 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
-            # Small indicator if a delivery address has been captured
+            # Small indicator if delivery info has been captured
             has_addr = bool(str(row.get('delivery_address', '')).strip())
-            addr_flag = " 📮" if has_addr else ""
+            has_tracking = bool(str(row.get('tracking_link', '')).strip())
+            addr_flag = " 📮" if (has_addr or has_tracking) else ""
 
             with st.expander(f"🛠️ {row.get('customer')} — {row.get('status')}{addr_flag}"):
                 c1, c2, c3 = st.columns(3)
@@ -171,8 +172,8 @@ with tabs[0]:
                                 st.toast("Record updated."); st.rerun()
 
                     with c_btn2:
-                        # NEW FUNCTIONALITY: Delivery Address capture
-                        with st.popover(f"📮 Address{' ✅' if has_addr else ''}"):
+                        # NEW FUNCTIONALITY: Delivery Address + Tracking Link capture
+                        with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
                             st.caption("Delivery address for this build")
                             addr_val = st.text_area(
                                 "Delivery Address",
@@ -181,10 +182,18 @@ with tabs[0]:
                                 height=120,
                                 key=f"addr_{row['id']}"
                             )
-                            if st.button("Save Address", key=f"addr_btn_{row['id']}", use_container_width=True):
-                                base.table("builds").update(row['id'], {"delivery_address": addr_val})
-                                update_local_record("builds", row['id'], {"delivery_address": addr_val})
-                                st.toast("Delivery address saved."); st.rerun()
+                            track_val = st.text_input(
+                                "Courier Tracking Link",
+                                value=row.get('tracking_link', ''),
+                                placeholder="https://...",
+                                key=f"track_{row['id']}"
+                            )
+                            if has_tracking:
+                                st.link_button("🔗 Open Tracking Link", row.get('tracking_link'), use_container_width=True)
+                            if st.button("Save Delivery Info", key=f"addr_btn_{row['id']}", use_container_width=True):
+                                base.table("builds").update(row['id'], {"delivery_address": addr_val, "tracking_link": track_val})
+                                update_local_record("builds", row['id'], {"delivery_address": addr_val, "tracking_link": track_val})
+                                st.toast("Delivery info saved."); st.rerun()
                     
                     with c_btn3:
                         # NEW FUNCTIONALITY: Printable Ticket Output Block
@@ -216,6 +225,12 @@ with tabs[0]:
                                 txt += f"\n====================================\n"
                                 txt += f"📮 DELIVERY ADDRESS\n"
                                 txt += f"{row.get('delivery_address')}\n"
+
+                            if has_tracking:
+                                if not has_addr:
+                                    txt += f"\n====================================\n"
+                                txt += f"🔗 TRACKING LINK\n"
+                                txt += f"{row.get('tracking_link')}\n"
 
                             txt += f"===================================="
                             
