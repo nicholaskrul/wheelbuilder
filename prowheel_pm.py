@@ -71,9 +71,7 @@ def render_client_portal(target_build_id):
 
     # Password Gate
     correct_password = row.get("wp_page_password")
-    
-    # Fallback if password was never generated for some reason
-    if not correct_password:
+    if isinstance(correct_password, float) or not correct_password or str(correct_password).lower() in ["none", "nan"]:
         st.warning("This build sheet has not been assigned a secure access key yet. Please contact the workshop.")
         st.stop()
 
@@ -85,26 +83,23 @@ def render_client_portal(target_build_id):
         st.info("Please enter the passkey sent to you to unlock your custom build metrics.")
         st.stop()
         
-    if user_input.strip() != correct_password.strip():
+    if user_input.strip() != str(correct_password).strip():
         st.error("❌ Incorrect passkey. Please double-check your records.")
         st.stop()
 
-    # --- PASSWORD PASSED: LOAD ONLY THE RELEVANT LIBRARIES FOR WEIGHT DISPLAY ---
+    # Load lookup tables for portal processing
     all_rims = pd.DataFrame([r['fields'] for r in base.table("rims").all()])
     all_hubs = pd.DataFrame([h['fields'] for h in base.table("hubs").all()])
     all_spokes = pd.DataFrame([s['fields'] for s in base.table("spokes").all()])
     all_nipples = pd.DataFrame([n['fields'] for n in base.table("nipples").all()])
     
-    # Helper lambda functions to inject 'label' cleanly
     for df, col in [(all_rims, 'rim'), (all_hubs, 'hub'), (all_spokes, 'spoke'), (all_nipples, 'nipple')]:
         if not df.empty and col in df.columns: df['label'] = df[col].astype(str).str.strip()
 
     client_bundle = {"rims": all_rims, "hubs": all_hubs, "spokes": all_spokes, "nipples": all_nipples}
     f_res, r_res = calculate_wheel_weights(row, client_bundle)
 
-    # --- RENDER PREMIUM BRANDED CLIENT DASHBOARD ---
     st.balloons()
-    
     st.markdown(f"## Your Custom Wheelset Build Sheet")
     st.markdown(f"**Client Profile:** {row.get('customer')} | **Completion Date:** {row.get('date')}")
     st.write("Thank you for choosing Wheelbuilder for your custom wheel build! Your wheelset is complete and ready for the road. Below you will find the verified specs, weights, invoice and logistics tracking information.")
@@ -112,7 +107,6 @@ def render_client_portal(target_build_id):
     st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on the workmanship and spokes. If you ever need any support or advice, please get in touch directly.")
 
     c_front, c_rear = st.columns(2)
-    
     with c_front:
         if f_res["exists"]:
             st.markdown("### 🔘 Front Wheel Configuration")
@@ -135,7 +129,6 @@ def render_client_portal(target_build_id):
     st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
     st.divider()
 
-    # Logistics CTAs
     c_btn1, c_btn2, _ = st.columns([1, 1, 2])
     inv_url = str(row.get('invoice_url', '')).strip()
     track_url = str(row.get('tracking_link', '')).strip()
@@ -148,20 +141,18 @@ def render_client_portal(target_build_id):
             st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
 
     st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
-    st.stop() # Stops execution here so the admin portal layout below never renders for clients.
+    st.stop()
 
 
 # --- 5. INITIAL ROUTING CHECK ---
-# Checks the URL bar for '?build=recXXXXX'
 if "build" in st.query_params:
     render_client_portal(st.query_params["build"])
 
 
 # =========================================================================
-# --- 6. ADMIN DASHBOARD ROUTE (Only runs if no '?build=' query param) ---
+# --- 6. ADMIN DASHBOARD ROUTE ---
 # =========================================================================
 
-# --- THE OPTIMIZED DATA ENGINE (API SAVER) ---
 @st.cache_data(ttl=3600, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
     tables = {
@@ -213,7 +204,6 @@ def update_local_record(table_name, record_id, updates):
 st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
-# --- TAB 1: WORKSHOP (PIPELINE) ---
 with tabs[0]:
     c_head, c_sync = st.columns([5, 1])
     with c_head: st.subheader("🏁 Workshop Pipeline")
@@ -269,13 +259,15 @@ with tabs[0]:
                     new_s = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
                     
                     if new_s != cur:
-                        if new_s == "Complete" and not row.get('wp_page_url'):
-                            # IN-APP AUTOMATION: Generate password and app URL string directly
+                        wp_url_val = row.get('wp_page_url')
+                        # FIXED: Strict verification ignoring float('nan') artifacts
+                        is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
+
+                        if new_s == "Complete" and not is_valid_wp:
                             alphabet = string.ascii_uppercase + string.digits
                             wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
                             
-                            # Build the localized Streamlit URL link framework parameters
-                            # NOTE: Change 'localhost' to your live URL when deployed (e.g., https://wheelbuilder.streamlit.app)
+                            # Update to your live Streamlit production URL domain when running live
                             base_url = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
                             wp_link = f"{base_url}/?build={row['id']}"
                             
@@ -321,7 +313,9 @@ with tabs[0]:
                             txt = f" W_LAB SPEC\nCust: {row.get('customer')}\nRim F: {row.get('f_rim')}\nHub F: {row.get('f_hub')}\nRim R: {row.get('r_rim')}\nHub R: {row.get('r_hub')}"
                             st.code(txt, language="text")
 
-                if row.get('wp_page_url'):
+                # FIXED: Verification mapping check for Handover display
+                wp_url_val = row.get('wp_page_url')
+                if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
                     st.markdown("---")
                     st.markdown("### 📱 Client Handover Kit")
                     client_msg = (
@@ -342,7 +336,9 @@ with tabs[0]:
                     with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
                         c_arch1, c_arch2 = st.columns([3, 1])
                         with c_arch1:
-                            if row.get('wp_page_url'):
+                            wp_url_val = row.get('wp_page_url')
+                            # FIXED: Added safe type assessment mapping bounds to Archive views
+                            if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
                                 st.markdown("**📱 Client Handover Kit**")
                                 client_msg = (
                                     f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! "
@@ -352,6 +348,8 @@ with tabs[0]:
                                     f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
                                 )
                                 st.code(client_msg, language="text")
+                            else:
+                                st.info("No Active Client Web Portal configuration currently mapped to this historical layout row.")
                         with c_arch2:
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
                                 base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
