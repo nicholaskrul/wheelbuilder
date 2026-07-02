@@ -69,7 +69,7 @@ def update_local_record(table_name, record_id, updates):
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-# --- 5. AUTOMATION & ANALYTICS HELPERS ---
+# --- 5. AUTOMATION & DIAGNOSTIC HELPERS ---
 def get_comp_data(table_key, label):
     if not label or label == "None": return {}
     df = st.session_state.data.get(table_key, pd.DataFrame())
@@ -79,14 +79,17 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    Generates a password-protected page on WordPress with build specs.
-    Returns a tuple of (page_url, password) if successful, or (None, None) on failure.
+    DIAGNOSTIC VERSION: Generates a page on WordPress and displays exact errors if it fails.
     """
     try:
+        if "wordpress" not in st.secrets:
+            st.error("❌ 'wordpress' section is missing entirely from your Streamlit secrets!")
+            return None, None
+            
         wp_secrets = st.secrets["wordpress"]
         wp_url = f"{wp_secrets['site_url'].rstrip('/')}/wp-json/wp/v2/pages"
         
-        # 1. Generate secure client-facing key
+        # 1. Key generation
         alphabet = string.ascii_uppercase + string.digits
         password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
         
@@ -96,7 +99,7 @@ def create_protected_wp_page(row, f_res, r_res):
         tracking_link = str(row.get('tracking_link', '')).strip()
         invoice_url = str(row.get('invoice_url', '')).strip()
         
-        # 2. Structure layout markup
+        # 2. Build template
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333;">
             <h2 style="color: #1d72b8; border-bottom: 2px solid #1d72b8; padding-bottom: 8px;">🚲 Your Custom Wheelset Build Sheet</h2>
@@ -156,6 +159,7 @@ def create_protected_wp_page(row, f_res, r_res):
             "template": ""
         }
         
+        # 3. Request logic with diagnostic capturing
         response = requests.post(
             wp_url,
             json=payload,
@@ -167,14 +171,20 @@ def create_protected_wp_page(row, f_res, r_res):
             data = response.json()
             return data.get("link"), password
         else:
+            st.error(f"💥 WordPress API Error! Status Code: {response.status_code}")
+            st.code(response.text, language="json")
             return None, None
             
-    except Exception:
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"❌ Connection Error: Could not reach your website. Check your URL configuration. Details: {req_err}")
+        return None, None
+    except Exception as e:
+        st.error(f"❌ Unexpected Error context: {e}")
         return None, None
 
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Automatic WordPress Sync Active")
+st.caption("Workshop Command Center | Verbose Error Logging Enabled")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -193,13 +203,12 @@ with tabs[0]:
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         
-        # Alphabetical, case-insensitive sorting by customer first name
+        # Alphabetical sorting by first name
         active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
         completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
         st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
         for _, row in active_builds.iterrows():
-            # Spoke/Nipple weight components
             spk_data = get_comp_data("spokes", row.get('spoke'))
             nip_data = get_comp_data("nipples", row.get('nipple'))
             u_spk = float(spk_data.get('weight', 0))
@@ -221,7 +230,6 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
-            # Safe verification of tracking link types
             addr_val = row.get('delivery_address')
             track_val = row.get('tracking_link')
 
@@ -266,8 +274,6 @@ with tabs[0]:
                                     base.table("builds").update(row['id'], updates)
                                     update_local_record("builds", row['id'], updates)
                                     st.toast("🎉 WP Protected Page Created successfully!"); st.rerun()
-                                else:
-                                    st.error("Failed to generate WordPress page. Check WP credentials.")
                         else:
                             base.table("builds").update(row['id'], {"status": new_s})
                             update_local_record("builds", row['id'], {"status": new_s})
@@ -348,7 +354,6 @@ with tabs[0]:
                             st.code(txt, language="text")
                             st.download_button("📥 Download Text File", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
 
-                # Render Client Messaging Kit if a live site record exists
                 if row.get('wp_page_url'):
                     st.markdown("---")
                     st.markdown("### 📱 Client Handover Kit")
