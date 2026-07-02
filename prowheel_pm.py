@@ -69,7 +69,7 @@ def update_local_record(table_name, record_id, updates):
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-# --- 5. AUTOMATION & DIAGNOSTIC HELPERS ---
+# --- 5. AUTOMATION & ANALYTICS HELPERS ---
 def get_comp_data(table_key, label):
     if not label or label == "None": return {}
     df = st.session_state.data.get(table_key, pd.DataFrame())
@@ -79,18 +79,18 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    Fortified Gateway Version: Posts securely to wb-gate.php with a complete
-    modern browser fingerprint profile to bypass global Cloudflare challenge configurations.
+    Production Version: Generates a secure, password-protected build page 
+    on WordPress via the custom root directory wb-gate.php endpoint.
     """
     try:
         if "wordpress" not in st.secrets:
-            st.error("❌ 'wordpress' section is missing entirely from your Streamlit secrets!")
+            st.error("❌ 'wordpress' section is missing from your Streamlit secrets!")
             return None, None
             
         wp_secrets = st.secrets["wordpress"]
         gateway_url = f"{wp_secrets['site_url'].rstrip('/')}/wb-gate.php"
         
-        # 1. Credentials key generation
+        # Generate random customer access key password
         alphabet = string.ascii_uppercase + string.digits
         password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
         
@@ -100,7 +100,7 @@ def create_protected_wp_page(row, f_res, r_res):
         tracking_link = str(row.get('tracking_link', '')).strip()
         invoice_url = str(row.get('invoice_url', '')).strip()
         
-        # 2. Compile HTML Document
+        # Build document container markup
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333;">
             <h2 style="color: #1d72b8; border-bottom: 2px solid #1d72b8; padding-bottom: 8px;">🚲 Your Custom Wheelset Build Sheet</h2>
@@ -148,26 +148,17 @@ def create_protected_wp_page(row, f_res, r_res):
         
         html_content += """
             <h3 style="color: #555; margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 15px;">📸 Build Gallery</h3>
-            <p style="color: #666; font-style: italic;">Workshop configuration and tension profiling media gallery will update here shortly.</p>
+            <p style="color: #666; font-style: italic;">Workshop configuration and media gallery uploads will post here directly.</p>
         </div>
         """
         
-        payload = {
-            "title": f"Build Sheet — {cust_name}",
-            "password": password,
-            "content": html_content
-        }
+        payload = {"title": f"Build Sheet — {cust_name}", "password": password, "content": html_content}
         
-        # 3. CRITICAL: Complete Chrome Fingerprint mapping headers 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
             "X-WB-Token": wp_secrets.get("gateway_token", ""),
             "Content-Type": "application/json",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": '"Windows"',
             "Sec-Fetch-Dest": "empty",
@@ -175,28 +166,19 @@ def create_protected_wp_page(row, f_res, r_res):
             "Sec-Fetch-Site": "same-origin"
         }
         
-        response = requests.post(
-            gateway_url,
-            json=payload,
-            headers=headers,
-            timeout=10
-        )
+        response = requests.post(gateway_url, json=payload, headers=headers, timeout=10)
         
         if response.status_code == 200:
-            data = response.json()
-            return data.get("link"), password
+            return response.json().get("link"), password
         else:
-            st.error(f"💥 Gateway Error! Status Code: {response.status_code}")
-            st.code(response.text)
             return None, None
             
-    except Exception as e:
-        st.error(f"❌ Connection Error: {e}")
+    except Exception:
         return None, None
 
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Cloudflare Anti-Bot Headers Deployed")
+st.caption("Workshop Command Center | Cloudflare Integration Cleaned")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -215,7 +197,7 @@ with tabs[0]:
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         
-        # Alphabetical sorting by first name
+        # Case-insensitive alphabetical sorting by first name
         active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
         completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
@@ -286,6 +268,8 @@ with tabs[0]:
                                     base.table("builds").update(row['id'], updates)
                                     update_local_record("builds", row['id'], updates)
                                     st.toast("🎉 WP Protected Page Created successfully!"); st.rerun()
+                                else:
+                                    st.error("Failed to write to WordPress gateway script. Check tokens.")
                         else:
                             base.table("builds").update(row['id'], {"status": new_s})
                             update_local_record("builds", row['id'], {"status": new_s})
@@ -377,16 +361,37 @@ with tabs[0]:
                         f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
                     )
                     st.code(client_msg, language="text")
-                    st.caption("Copy the message text block above to drop directly into WhatsApp or Email communication threads.")
 
         st.divider()
+        
+        # --- 🛠️ UPGRADED: COMPLETED ARCHIVE EXPANSER ECOSYSTEM ---
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
             if not completed_builds.empty:
                 for _, row in completed_builds.iterrows():
-                    st.write(f"✅ **{row.get('customer')}** — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}")
-                    if st.button("Re-open Build", key=f"re_{row['id']}"):
-                        base.table("builds").update(row['id'], {"status": "Building"})
-                        refresh_api(); st.rerun()
+                    # Generate an individual sub-expander box for each historical customer entry
+                    with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
+                        c_arch1, c_arch2 = st.columns([3, 1])
+                        
+                        with c_arch1:
+                            if row.get('wp_page_url'):
+                                st.markdown("**📱 Client Handover Kit**")
+                                client_msg = (
+                                    f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! "
+                                    f"I've created a secure digital build sheet profile for your records.\n\n"
+                                    f"🔗 Link: {row.get('wp_page_url')}\n"
+                                    f"🔑 Password: {row.get('wp_page_password')}\n\n"
+                                    f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
+                                )
+                                st.code(client_msg, language="text")
+                            else:
+                                st.info("No active WordPress portfolio generation data mapped to this historical layout row.")
+                        
+                        with c_arch2:
+                            st.markdown("**⚙️ Configuration**")
+                            if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
+                                # Reset fields upon reopening so it can regenerate cleanly if closed again later
+                                base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
+                                refresh_api(); st.success("Build reassigned to workspace pipeline!"); st.rerun()
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
