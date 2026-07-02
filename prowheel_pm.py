@@ -79,8 +79,8 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    Method 1 Implementation: Generates a password-protected build page on WordPress 
-    by spoofing browser request headers to negotiate Cloudflare challenge setups.
+    Gateway Version: Posts securely to wb-gate.php to completely bypass 
+    the Cloudflare REST API firewall policies enforced by managed hosts.
     """
     try:
         if "wordpress" not in st.secrets:
@@ -88,7 +88,8 @@ def create_protected_wp_page(row, f_res, r_res):
             return None, None
             
         wp_secrets = st.secrets["wordpress"]
-        wp_url = f"{wp_secrets['site_url'].rstrip('/')}/wp-json/wp/v2/pages"
+        # Targets the custom backdoor endpoint directly
+        gateway_url = f"{wp_secrets['site_url'].rstrip('/')}/wb-gate.php"
         
         # 1. Credentials key generation
         alphabet = string.ascii_uppercase + string.digits
@@ -154,41 +155,33 @@ def create_protected_wp_page(row, f_res, r_res):
         
         payload = {
             "title": f"Build Sheet — {cust_name}",
-            "status": "publish",
             "password": password,
-            "content": html_content,
-            "template": ""
+            "content": html_content
         }
         
-        # 3. FIX: Spoof Headers to masquerade Python script execution as a standard Chrome web browser
+        # 3. Request logic authentication via secure token header 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.9"
+            "X-WB-Token": wp_secrets.get("gateway_token", ""),
+            "Content-Type": "application/json"
         }
         
-        # Execute HTTP Post request matching user configurations
         response = requests.post(
-            wp_url,
+            gateway_url,
             json=payload,
-            auth=(wp_secrets["username"], wp_secrets["app_password"]),
             headers=headers,
             timeout=10
         )
         
-        if response.status_code == 201:
+        if response.status_code == 200:
             data = response.json()
             return data.get("link"), password
         else:
-            st.error(f"💥 WordPress API Error! Status Code: {response.status_code}")
-            st.code(response.text, language="json")
+            st.error(f"💥 Gateway Error! Status Code: {response.status_code}")
+            st.code(response.text)
             return None, None
             
-    except requests.exceptions.RequestException as req_err:
-        st.error(f"❌ Connection Error: Could not reach your website. Details: {req_err}")
-        return None, None
     except Exception as e:
-        st.error(f"❌ Unexpected error tracking frame context: {e}")
+        st.error(f"❌ Connection Error: {e}")
         return None, None
 
 # --- 6. MAIN UI ---
