@@ -79,8 +79,8 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    Gateway Version: Posts securely to wb-gate.php to completely bypass 
-    the Cloudflare REST API firewall policies enforced by managed hosts.
+    Fortified Gateway Version: Posts securely to wb-gate.php with a complete
+    modern browser fingerprint profile to bypass global Cloudflare challenge configurations.
     """
     try:
         if "wordpress" not in st.secrets:
@@ -88,7 +88,6 @@ def create_protected_wp_page(row, f_res, r_res):
             return None, None
             
         wp_secrets = st.secrets["wordpress"]
-        # Targets the custom backdoor endpoint directly
         gateway_url = f"{wp_secrets['site_url'].rstrip('/')}/wb-gate.php"
         
         # 1. Credentials key generation
@@ -159,10 +158,21 @@ def create_protected_wp_page(row, f_res, r_res):
             "content": html_content
         }
         
-        # 3. Request logic authentication via secure token header 
+        # 3. CRITICAL: Complete Chrome Fingerprint mapping headers 
         headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
             "X-WB-Token": wp_secrets.get("gateway_token", ""),
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin"
         }
         
         response = requests.post(
