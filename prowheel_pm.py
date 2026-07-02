@@ -79,7 +79,8 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    DIAGNOSTIC VERSION: Generates a page on WordPress and displays exact errors if it fails.
+    Method 1 Implementation: Generates a password-protected build page on WordPress 
+    by spoofing browser request headers to negotiate Cloudflare challenge setups.
     """
     try:
         if "wordpress" not in st.secrets:
@@ -89,7 +90,7 @@ def create_protected_wp_page(row, f_res, r_res):
         wp_secrets = st.secrets["wordpress"]
         wp_url = f"{wp_secrets['site_url'].rstrip('/')}/wp-json/wp/v2/pages"
         
-        # 1. Key generation
+        # 1. Credentials key generation
         alphabet = string.ascii_uppercase + string.digits
         password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
         
@@ -99,7 +100,7 @@ def create_protected_wp_page(row, f_res, r_res):
         tracking_link = str(row.get('tracking_link', '')).strip()
         invoice_url = str(row.get('invoice_url', '')).strip()
         
-        # 2. Build template
+        # 2. Compile HTML Document
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333;">
             <h2 style="color: #1d72b8; border-bottom: 2px solid #1d72b8; padding-bottom: 8px;">🚲 Your Custom Wheelset Build Sheet</h2>
@@ -159,11 +160,19 @@ def create_protected_wp_page(row, f_res, r_res):
             "template": ""
         }
         
-        # 3. Request logic with diagnostic capturing
+        # 3. FIX: Spoof Headers to masquerade Python script execution as a standard Chrome web browser
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+        
+        # Execute HTTP Post request matching user configurations
         response = requests.post(
             wp_url,
             json=payload,
             auth=(wp_secrets["username"], wp_secrets["app_password"]),
+            headers=headers,
             timeout=10
         )
         
@@ -176,15 +185,15 @@ def create_protected_wp_page(row, f_res, r_res):
             return None, None
             
     except requests.exceptions.RequestException as req_err:
-        st.error(f"❌ Connection Error: Could not reach your website. Check your URL configuration. Details: {req_err}")
+        st.error(f"❌ Connection Error: Could not reach your website. Details: {req_err}")
         return None, None
     except Exception as e:
-        st.error(f"❌ Unexpected Error context: {e}")
+        st.error(f"❌ Unexpected error tracking frame context: {e}")
         return None, None
 
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Verbose Error Logging Enabled")
+st.caption("Workshop Command Center | Cloudflare Anti-Bot Headers Deployed")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
