@@ -7,7 +7,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.15", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.16", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -129,7 +129,8 @@ def render_client_portal(target_build_id):
     st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
     st.divider()
 
-    c_btn1, c_btn2, _ = st.columns([1, 1, 2])
+    # Logistics & Feedback CTAs
+    c_btn1, c_btn2, c_btn3 = st.columns([1, 1, 1])
     inv_url = str(row.get('invoice_url', '')).strip()
     track_url = str(row.get('tracking_link', '')).strip()
 
@@ -139,6 +140,9 @@ def render_client_portal(target_build_id):
     with c_btn2:
         if track_url and track_url.lower() not in ['none', 'nan', '']:
             st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
+    with c_btn3:
+        # --- NEW GOOGLE REVIEW CTA BUTTON ---
+        st.link_button("⭐️ Leave a Google Review", "https://g.page/r/CVj8dcB7IKHrEAE/review", use_container_width=True)
 
     st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
     st.stop()
@@ -260,14 +264,12 @@ with tabs[0]:
                     
                     if new_s != cur:
                         wp_url_val = row.get('wp_page_url')
-                        # FIXED: Strict verification ignoring float('nan') artifacts
                         is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
 
                         if new_s == "Complete" and not is_valid_wp:
                             alphabet = string.ascii_uppercase + string.digits
                             wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
                             
-                            # Update to your live Streamlit production URL domain when running live
                             base_url = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
                             wp_link = f"{base_url}/?build={row['id']}"
                             
@@ -313,7 +315,6 @@ with tabs[0]:
                             txt = f" W_LAB SPEC\nCust: {row.get('customer')}\nRim F: {row.get('f_rim')}\nHub F: {row.get('f_hub')}\nRim R: {row.get('r_rim')}\nHub R: {row.get('r_hub')}"
                             st.code(txt, language="text")
 
-                # FIXED: Verification mapping check for Handover display
                 wp_url_val = row.get('wp_page_url')
                 if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
                     st.markdown("---")
@@ -337,7 +338,6 @@ with tabs[0]:
                         c_arch1, c_arch2 = st.columns([3, 1])
                         with c_arch1:
                             wp_url_val = row.get('wp_page_url')
-                            # FIXED: Added safe type assessment mapping bounds to Archive views
                             if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
                                 st.markdown("**📱 Client Handover Kit**")
                                 client_msg = (
@@ -348,8 +348,6 @@ with tabs[0]:
                                     f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
                                 )
                                 st.code(client_msg, language="text")
-                            else:
-                                st.info("No Active Client Web Portal configuration currently mapped to this historical layout row.")
                         with c_arch2:
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
                                 base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
