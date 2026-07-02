@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import time
+import secrets
+import string
+import requests
 from datetime import datetime
 from pyairtable import Api
 
@@ -66,7 +69,7 @@ def update_local_record(table_name, record_id, updates):
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-# --- 5. ANALYTICS HELPERS ---
+# --- 5. AUTOMATION & ANALYTICS HELPERS ---
 def get_comp_data(table_key, label):
     if not label or label == "None": return {}
     df = st.session_state.data.get(table_key, pd.DataFrame())
@@ -74,9 +77,104 @@ def get_comp_data(table_key, label):
     match = df[df['label'].str.lower() == str(label).lower().strip()]
     return match.iloc[0].to_dict() if not match.empty else {}
 
+def create_protected_wp_page(row, f_res, r_res):
+    """
+    Generates a password-protected page on WordPress with build specs.
+    Returns a tuple of (page_url, password) if successful, or (None, None) on failure.
+    """
+    try:
+        wp_secrets = st.secrets["wordpress"]
+        wp_url = f"{wp_secrets['site_url'].rstrip('/')}/wp-json/wp/v2/pages"
+        
+        # 1. Generate secure client-facing key
+        alphabet = string.ascii_uppercase + string.digits
+        password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+        
+        cust_name = row.get('customer', 'Valued Client')
+        spoke_model = row.get('spoke', 'N/A')
+        nipple_model = row.get('nipple', 'N/A')
+        tracking_link = str(row.get('tracking_link', '')).strip()
+        invoice_url = str(row.get('invoice_url', '')).strip()
+        
+        # 2. Structure layout markup
+        html_content = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333;">
+            <h2 style="color: #1d72b8; border-bottom: 2px solid #1d72b8; padding-bottom: 8px;">🚲 Your Custom Wheelset Build Sheet</h2>
+            <p>Thank you for choosing Wheelbuilder Lab! Your custom wheelset is complete and ready for the road. Below you will find the verified specs, weights, and logistics tracking for your unique build archive.</p>
+            
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr style="background-color: #f2f2f2;"><th style="padding: 10px; text-align: left; border: 1px solid #ddd;" colspan="2">System Overview</th></tr>
+                <tr><td style="padding: 10px; border: 1px solid #ddd;"><strong>Spoke Model</strong></td><td style="padding: 10px; border: 1px solid #ddd;">{spoke_model}</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #ddd;"><strong>Nipple Model</strong></td><td style="padding: 10px; border: 1px solid #ddd;">{nipple_model}</td></tr>
+                <tr style="font-weight: bold; background-color: #e6f7ff;">
+                    <td style="padding: 10px; border: 1px solid #ddd;">Total Weight Verified</td>
+                    <td style="padding: 10px; border: 1px solid #ddd;">{int(f_res['total'] + r_res['total'])}g</td>
+                </tr>
+            </table>
+        """
+        
+        if f_res["exists"]:
+            html_content += f"""
+            <h3 style="color: #555; margin-top: 25px;">🔘 Front Wheel Specs</h3>
+            <ul>
+                <li><strong>Rim:</strong> {row.get('f_rim')}</li>
+                <li><strong>Hub:</strong> {row.get('f_hub')}</li>
+                <li><strong>Spoke Lengths:</strong> Left {row.get('f_l')}mm / Right {row.get('f_r')}mm</li>
+                <li><strong>Component Weight:</strong> {int(f_res['total'])}g</li>
+            </ul>
+            """
+            
+        if r_res["exists"]:
+            html_content += f"""
+            <h3 style="color: #555; margin-top: 25px;">🔘 Rear Wheel Specs</h3>
+            <ul>
+                <li><strong>Rim:</strong> {row.get('r_rim')}</li>
+                <li><strong>Hub:</strong> {row.get('r_hub')}</li>
+                <li><strong>Spoke Lengths:</strong> Left {row.get('r_l')}mm / Right {row.get('r_r')}mm</li>
+                <li><strong>Component Weight:</strong> {int(r_res['total'])}g</li>
+            </ul>
+            """
+            
+        html_content += "<h3 style='color: #555; margin-top: 25px;'>📦 Documents & Tracking</h3><p>"
+        if invoice_url and invoice_url.lower() not in ["none", "nan"]:
+            html_content += f'<a href="{invoice_url}" target="_blank" style="display: inline-block; padding: 10px 15px; margin-right: 10px; background-color: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📄 View Invoice</a>'
+        if tracking_link and tracking_link.lower() not in ["none", "nan"]:
+            html_content += f'<a href="{tracking_link}" target="_blank" style="display: inline-block; padding: 10px 15px; background-color: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🚚 Track Shipment</a>'
+        html_content += "</p>"
+        
+        html_content += """
+            <h3 style="color: #555; margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 15px;">📸 Build Gallery</h3>
+            <p style="color: #666; font-style: italic;">Workshop configuration and tension profiling media gallery will update here shortly.</p>
+        </div>
+        """
+        
+        payload = {
+            "title": f"Build Sheet — {cust_name}",
+            "status": "publish",
+            "password": password,
+            "content": html_content,
+            "template": ""
+        }
+        
+        response = requests.post(
+            wp_url,
+            json=payload,
+            auth=(wp_secrets["username"], wp_secrets["app_password"]),
+            timeout=10
+        )
+        
+        if response.status_code == 201:
+            data = response.json()
+            return data.get("link"), password
+        else:
+            return None, None
+            
+    except Exception:
+        return None, None
+
 # --- 6. MAIN UI ---
 st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Alphabetical Sorting Enabled")
+st.caption("Workshop Command Center | Automatic WordPress Sync Active")
 
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -95,7 +193,7 @@ with tabs[0]:
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         
-        # --- UPDATED: Alphabetical, case-insensitive sorting by customer first name ---
+        # Alphabetical, case-insensitive sorting by customer first name
         active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
         completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
@@ -123,6 +221,7 @@ with tabs[0]:
                 r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
                 r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
 
+            # Safe verification of tracking link types
             addr_val = row.get('delivery_address')
             track_val = row.get('tracking_link')
 
@@ -159,11 +258,21 @@ with tabs[0]:
                     new_s = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
                     
                     if new_s != cur:
-                        base.table("builds").update(row['id'], {"status": new_s})
-                        update_local_record("builds", row['id'], {"status": new_s})
-                        st.toast(f"Status changed to {new_s}"); st.rerun()
+                        if new_s == "Complete" and not row.get('wp_page_url'):
+                            with st.spinner(f"Creating protected build page for {row.get('customer')} on WordPress..."):
+                                wp_link, wp_pass = create_protected_wp_page(row, f_res, r_res)
+                                if wp_link:
+                                    updates = {"status": new_s, "wp_page_url": wp_link, "wp_page_password": wp_pass}
+                                    base.table("builds").update(row['id'], updates)
+                                    update_local_record("builds", row['id'], updates)
+                                    st.toast("🎉 WP Protected Page Created successfully!"); st.rerun()
+                                else:
+                                    st.error("Failed to generate WordPress page. Check WP credentials.")
+                        else:
+                            base.table("builds").update(row['id'], {"status": new_s})
+                            update_local_record("builds", row['id'], {"status": new_s})
+                            st.toast(f"Status changed to {new_s}"); st.rerun()
                     
-                    # Layout buttons inside expander columns
                     c_btn1, c_btn2, c_btn3 = st.columns(3)
                     with c_btn1:
                         with st.popover("📝 Details"):
@@ -238,6 +347,20 @@ with tabs[0]:
                             
                             st.code(txt, language="text")
                             st.download_button("📥 Download Text File", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
+
+                # Render Client Messaging Kit if a live site record exists
+                if row.get('wp_page_url'):
+                    st.markdown("---")
+                    st.markdown("### 📱 Client Handover Kit")
+                    client_msg = (
+                        f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! "
+                        f"I've created a secure digital build sheet profile for your records.\n\n"
+                        f"🔗 Link: {row.get('wp_page_url')}\n"
+                        f"🔑 Password: {row.get('wp_page_password')}\n\n"
+                        f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
+                    )
+                    st.code(client_msg, language="text")
+                    st.caption("Copy the message text block above to drop directly into WhatsApp or Email communication threads.")
 
         st.divider()
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
