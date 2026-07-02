@@ -3,12 +3,11 @@ import pandas as pd
 import time
 import secrets
 import string
-import requests
 from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.12", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.15", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -20,7 +19,149 @@ except Exception:
     st.error("❌ Airtable Connection Error: Check your Streamlit Secrets.")
     st.stop()
 
-# --- 3. THE OPTIMIZED DATA ENGINE (API SAVER) ---
+# --- 3. ANALYTICS & SPECIFIC COMPONENT HELPERS ---
+def get_comp_data_from_bundle(bundle, table_key, label):
+    if not label or label == "None": return {}
+    df = bundle.get(table_key, pd.DataFrame())
+    if df.empty: return {}
+    match = df[df['label'].str.lower() == str(label).lower().strip()]
+    return match.iloc[0].to_dict() if not match.empty else {}
+
+def calculate_wheel_weights(row, bundle):
+    """Calculates weights dynamically based on row data and component databases"""
+    spk_data = get_comp_data_from_bundle(bundle, "spokes", row.get('spoke'))
+    nip_data = get_comp_data_from_bundle(bundle, "nipples", row.get('nipple'))
+    u_spk = float(spk_data.get('weight', 0))
+    u_nip = float(nip_data.get('weight', 0))
+
+    f_res = {"total": 0.0, "exists": False}
+    if row.get('f_rim') and row.get('f_rim') != "None":
+        frd = get_comp_data_from_bundle(bundle, "rims", row.get('f_rim'))
+        fhd = get_comp_data_from_bundle(bundle, "hubs", row.get('f_hub'))
+        h = int(frd.get('holes', 0))
+        f_res.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0))})
+        f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
+
+    r_res = {"total": 0.0, "exists": False}
+    if row.get('r_rim') and row.get('r_rim') != "None":
+        rrd = get_comp_data_from_bundle(bundle, "rims", row.get('r_rim'))
+        rhd = get_comp_data_from_bundle(bundle, "hubs", row.get('r_hub'))
+        h = int(rrd.get('holes', 0))
+        r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
+        r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
+        
+    return f_res, r_res
+
+# --- 4. CLIENT PORTAL RENDER ENGINE ---
+def render_client_portal(target_build_id):
+    """Surgically isolates and displays a single client build sheet with password protection"""
+    try:
+        with st.spinner("Loading secure build profile..."):
+            record = base.table("builds").get(target_build_id)
+            row = record.get("fields", {})
+            row["id"] = record.get("id")
+    except Exception:
+        st.error("❌ Invalid or expired build link reference.")
+        st.stop()
+
+    # Layout branding header
+    st.markdown("<h1 style='text-align: center; margin-top:20px;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #666;'>Secure Client Verification Portal</p>", unsafe_allow_html=True)
+    st.divider()
+
+    # Password Gate
+    correct_password = row.get("wp_page_password")
+    
+    # Fallback if password was never generated for some reason
+    if not correct_password:
+        st.warning("This build sheet has not been assigned a secure access key yet. Please contact the workshop.")
+        st.stop()
+
+    c_pass, _ = st.columns([2, 3])
+    with c_pass:
+        user_input = st.text_input("🔑 Enter your Build Passkey:", type="password", help="Provided to you via WhatsApp or Email")
+        
+    if not user_input:
+        st.info("Please enter the passkey sent to you to unlock your custom build metrics.")
+        st.stop()
+        
+    if user_input.strip() != correct_password.strip():
+        st.error("❌ Incorrect passkey. Please double-check your records.")
+        st.stop()
+
+    # --- PASSWORD PASSED: LOAD ONLY THE RELEVANT LIBRARIES FOR WEIGHT DISPLAY ---
+    all_rims = pd.DataFrame([r['fields'] for r in base.table("rims").all()])
+    all_hubs = pd.DataFrame([h['fields'] for h in base.table("hubs").all()])
+    all_spokes = pd.DataFrame([s['fields'] for s in base.table("spokes").all()])
+    all_nipples = pd.DataFrame([n['fields'] for n in base.table("nipples").all()])
+    
+    # Helper lambda functions to inject 'label' cleanly
+    for df, col in [(all_rims, 'rim'), (all_hubs, 'hub'), (all_spokes, 'spoke'), (all_nipples, 'nipple')]:
+        if not df.empty and col in df.columns: df['label'] = df[col].astype(str).str.strip()
+
+    client_bundle = {"rims": all_rims, "hubs": all_hubs, "spokes": all_spokes, "nipples": all_nipples}
+    f_res, r_res = calculate_wheel_weights(row, client_bundle)
+
+    # --- RENDER PREMIUM BRANDED CLIENT DASHBOARD ---
+    st.balloons()
+    
+    st.markdown(f"## Your Custom Wheelset Build Sheet")
+    st.markdown(f"**Client Profile:** {row.get('customer')} | **Completion Date:** {row.get('date')}")
+    st.write("Thank you for choosing Wheelbuilder for your custom wheel build! Your wheelset is complete and ready for the road. Below you will find the verified specs, weights, invoice and logistics tracking information.")
+    
+    st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on the workmanship and spokes. If you ever need any support or advice, please get in touch directly.")
+
+    c_front, c_rear = st.columns(2)
+    
+    with c_front:
+        if f_res["exists"]:
+            st.markdown("### 🔘 Front Wheel Configuration")
+            st.markdown(f"- **Rim:** {row.get('f_rim')}")
+            st.markdown(f"- **Hub:** {row.get('f_hub')}")
+            st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
+            st.markdown(f"- **Nipples:** {row.get('nipple')}")
+            st.metric("Verified Front Weight", f"{int(f_res['total'])}g")
+            
+    with c_rear:
+        if r_res["exists"]:
+            st.markdown("### 🔘 Rear Wheel Configuration")
+            st.markdown(f"- **Rim:** {row.get('r_rim')}")
+            st.markdown(f"- **Hub:** {row.get('r_hub')}")
+            st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
+            st.markdown(f"- **Nipples:** {row.get('nipple')}")
+            st.metric("Verified Rear Weight", f"{int(r_res['total'])}g")
+
+    st.divider()
+    st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
+    st.divider()
+
+    # Logistics CTAs
+    c_btn1, c_btn2, _ = st.columns([1, 1, 2])
+    inv_url = str(row.get('invoice_url', '')).strip()
+    track_url = str(row.get('tracking_link', '')).strip()
+
+    with c_btn1:
+        if inv_url and inv_url.lower() not in ['none', 'nan', '']:
+            st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
+    with c_btn2:
+        if track_url and track_url.lower() not in ['none', 'nan', '']:
+            st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
+
+    st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
+    st.stop() # Stops execution here so the admin portal layout below never renders for clients.
+
+
+# --- 5. INITIAL ROUTING CHECK ---
+# Checks the URL bar for '?build=recXXXXX'
+if "build" in st.query_params:
+    render_client_portal(st.query_params["build"])
+
+
+# =========================================================================
+# --- 6. ADMIN DASHBOARD ROUTE (Only runs if no '?build=' query param) ---
+# =========================================================================
+
+# --- THE OPTIMIZED DATA ENGINE (API SAVER) ---
 @st.cache_data(ttl=3600, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
     tables = {
@@ -54,7 +195,6 @@ def fetch_master_bundle():
             bundle[table_name] = pd.DataFrame()
     return bundle
 
-# --- 4. STATE & SYNC MANAGEMENT ---
 if 'data' not in st.session_state:
     st.session_state.data = fetch_master_bundle()
 
@@ -69,144 +209,8 @@ def update_local_record(table_name, record_id, updates):
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-# --- 5. AUTOMATION & ANALYTICS HELPERS ---
-def get_comp_data(table_key, label):
-    if not label or label == "None": return {}
-    df = st.session_state.data.get(table_key, pd.DataFrame())
-    if df.empty: return {}
-    match = df[df['label'].str.lower() == str(label).lower().strip()]
-    return match.iloc[0].to_dict() if not match.empty else {}
 
-def create_protected_wp_page(row, f_res, r_res):
-    """
-    Production Version: Generates a premium, password-protected build page 
-    on WordPress matching the exact visual identity of wheelbuilder.co.za
-    """
-    try:
-        if "wordpress" not in st.secrets:
-            st.error("❌ 'wordpress' section is missing from your Streamlit secrets!")
-            return None, None
-            
-        wp_secrets = st.secrets["wordpress"]
-        gateway_url = f"{wp_secrets['site_url'].rstrip('/')}/wb-gate.php"
-        
-        # Generate clean customer access password
-        alphabet = string.ascii_uppercase + string.digits
-        password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
-        
-        cust_name = row.get('customer', 'Valued Client')
-        spoke_model = row.get('spoke', 'N/A')
-        nipple_model = row.get('nipple', 'N/A')
-        tracking_link = str(row.get('tracking_link', '')).strip()
-        invoice_url = str(row.get('invoice_url', '')).strip()
-        
-        # --- PREVENT CRASHES: Safe parsing of float spoke lengths ---
-        def format_len(val):
-            try:
-                return f"{float(val):.1f}" if val and float(val) > 0 else "N/A"
-            except (ValueError, TypeError):
-                return "N/A"
-
-        # --- PREMIUM HTML MARKUP TUNED TO WHEELBUILDER.CO.ZA BRANDING ---
-        html_content = f"""
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 30px 15px; color: #222; background-color: #ffffff; line-height: 1.7;">
-            
-            <h1 style="font-size: 26px; font-weight: 700; color: #111; margin-bottom: 20px; letter-spacing: -0.5px; text-transform: uppercase; border-bottom: 3px solid #111; padding-bottom: 12px; margin-top: 0;">
-                Your custom wheelset build sheet
-            </h1>
-            
-            <p style="font-size: 15px; margin-bottom: 18px; color: #333;">
-                Thank you for choosing Wheelbuilder for your custom wheel build! Your wheelset is complete and ready for the road. Below you will find the verified specs, weights, invoice and logistics tracking information.
-            </p>
-            
-            <div style="background-color: #f8f9fa; border-left: 4px solid #111; padding: 16px; margin-bottom: 30px; border-radius: 0 4px 4px 0;">
-                <p style="font-size: 14.5px; margin: 0; font-style: italic; color: #444; font-weight: 500;">
-                    Your wheels come with a lifetime warranty on the workmanship and spokes. If you ever need any support or advice, please get in touch directly.
-                </p>
-            </div>
-        """
-        
-        # Front Wheel Table Block
-        if f_res["exists"]:
-            html_content += f"""
-            <div style="border: 1px solid #eaeaea; border-radius: 6px; padding: 20px; margin-bottom: 24px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.01);">
-                <h2 style="font-size: 16px; font-weight: 700; color: #111; margin-top: 0; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eaeaea; padding-bottom: 8px;">
-                    🔘 Front Wheel Configuration
-                </h2>
-                <table style="width: 100%; border-collapse: collapse; font-size: 14.5px;">
-                    <tr><td style="padding: 6px 0; color: #666; width: 35%;">Rim</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('f_rim')}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Hub</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('f_hub')}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Spokes</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{spoke_model} <span style="color:#666; font-weight: normal; font-size:13.5px; margin-left: 6px;">(L: {format_len(row.get('f_l'))}mm / R: {format_len(row.get('f_r'))}mm)</span></td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Nipples</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{nipple_model}</td></tr>
-                    <tr><td style="padding: 10px 0 0 0; color: #111; font-weight: 700; border-top: 1px dashed #eaeaea; margin-top: 6px;">Wheel Weight</td><td style="padding: 10px 0 0 0; font-weight: 700; color: #111; border-top: 1px dashed #eaeaea; font-size: 15px;">{int(f_res['total'])}g</td></tr>
-                </table>
-            </div>
-            """
-            
-        # Rear Wheel Table Block
-        if r_res["exists"]:
-            html_content += f"""
-            <div style="border: 1px solid #eaeaea; border-radius: 6px; padding: 20px; margin-bottom: 24px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.01);">
-                <h2 style="font-size: 16px; font-weight: 700; color: #111; margin-top: 0; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eaeaea; padding-bottom: 8px;">
-                    🔘 Rear Wheel Configuration
-                </h2>
-                <table style="width: 100%; border-collapse: collapse; font-size: 14.5px;">
-                    <tr><td style="padding: 6px 0; color: #666; width: 35%;">Rim</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('r_rim')}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Hub</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('r_hub')}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Spokes</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{spoke_model} <span style="color:#666; font-weight: normal; font-size:13.5px; margin-left: 6px;">(L: {format_len(row.get('r_l'))}mm / R: {format_len(row.get('r_r'))}mm)</span></td></tr>
-                    <tr><td style="padding: 6px 0; color: #666;">Nipples</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{nipple_model}</td></tr>
-                    <tr><td style="padding: 10px 0 0 0; color: #111; font-weight: 700; border-top: 1px dashed #eaeaea; margin-top: 6px;">Wheel Weight</td><td style="padding: 10px 0 0 0; font-weight: 700; color: #111; border-top: 1px dashed #eaeaea; font-size: 15px;">{int(r_res['total'])}g</td></tr>
-                </table>
-            </div>
-            """
-            
-        # Total Summary Weight Box
-        html_content += f"""
-        <div style="background-color: #111111; color: #ffffff; padding: 18px 20px; border-radius: 6px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #999;">Wheelset Weight Total</span>
-            <span style="font-size: 22px; font-weight: 700; color: #ffffff;">{int(f_res['total'] + r_res['total'])}g</span>
-        </div>
-        """
-        
-        # Logistics Actions Buttons
-        html_content += "<div style='margin-bottom: 35px; margin-top: 10px;'>"
-        if invoice_url and invoice_url.lower() not in ["none", "nan"]:
-            html_content += f'<a href="{invoice_url}" target="_blank" style="display: inline-block; padding: 11px 18px; margin-right: 12px; margin-bottom: 10px; border: 2px solid #111; color: #111; background-color: #fff; text-decoration: none; border-radius: 4px; font-weight: 700; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">📄 View Invoice</a>'
-        if tracking_link and tracking_link.lower() not in ["none", "nan"]:
-            html_content += f'<a href="{tracking_link}" target="_blank" style="display: inline-block; padding: 11px 18px; margin-bottom: 10px; background-color: #111; color: #fff; text-decoration: none; border-radius: 4px; font-weight: 700; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">🚚 Track Shipment</a>'
-        html_content += "</div>"
-        
-        # Static Clean Content Gallery Placeholder
-        html_content += """
-            <div style="border-top: 1px solid #eaeaea; padding-top: 25px; margin-top: 25px;">
-                <h3 style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; color: #111;">📸 Build Gallery</h3>
-                <p style="color: #666; font-style: italic; font-size: 13.5px; margin: 0;">High-resolution configuration imagery layout and tension profiles will update here shortly.</p>
-            </div>
-        </div>
-        """
-        
-        payload = {"title": f"Build Sheet — {cust_name}", "password": password, "content": html_content}
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "X-WB-Token": wp_secrets.get("gateway_token", ""),
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(gateway_url, json=payload, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json().get("link"), password
-        else:
-            return None, None
-            
-    except Exception:
-        return None, None
-
-# --- 6. MAIN UI ---
-st.title("🚲 Wheelbuilder Lab v18.12")
-st.caption("Workshop Command Center | Cloudflare Integration Cleaned")
-
+st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
 # --- TAB 1: WORKSHOP (PIPELINE) ---
@@ -223,37 +227,15 @@ with tabs[0]:
         st.info("No active builds found.")
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
-        
-        # Case-insensitive alphabetical sorting by customer first name
         active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
         completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
         st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
         for _, row in active_builds.iterrows():
-            spk_data = get_comp_data("spokes", row.get('spoke'))
-            nip_data = get_comp_data("nipples", row.get('nipple'))
-            u_spk = float(spk_data.get('weight', 0))
-            u_nip = float(nip_data.get('weight', 0))
-
-            f_res = {"total": 0.0, "exists": False}
-            if row.get('f_rim') and row.get('f_rim') != "None":
-                frd = get_comp_data("rims", row.get('f_rim'))
-                fhd = get_comp_data("hubs", row.get('f_hub'))
-                h = int(frd.get('holes', 0))
-                f_res.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0))})
-                f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
-
-            r_res = {"total": 0.0, "exists": False}
-            if row.get('r_rim') and row.get('r_rim') != "None":
-                rrd = get_comp_data("rims", row.get('r_rim'))
-                rhd = get_comp_data("hubs", row.get('r_hub'))
-                h = int(rrd.get('holes', 0))
-                r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
-                r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
+            f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
 
             addr_val = row.get('delivery_address')
             track_val = row.get('tracking_link')
-
             has_addr = isinstance(addr_val, str) and bool(addr_val.strip()) and addr_val.lower() not in ["none", "nan"]
             has_tracking = isinstance(track_val, str) and bool(track_val.strip()) and track_val.lower() not in ["none", "nan"]
             addr_flag = " 📮" if (has_addr or has_tracking) else ""
@@ -288,15 +270,19 @@ with tabs[0]:
                     
                     if new_s != cur:
                         if new_s == "Complete" and not row.get('wp_page_url'):
-                            with st.spinner(f"Creating protected build page for {row.get('customer')} on WordPress..."):
-                                wp_link, wp_pass = create_protected_wp_page(row, f_res, r_res)
-                                if wp_link:
-                                    updates = {"status": new_s, "wp_page_url": wp_link, "wp_page_password": wp_pass}
-                                    base.table("builds").update(row['id'], updates)
-                                    update_local_record("builds", row['id'], updates)
-                                    st.toast("🎉 WP Protected Page Created successfully!"); st.rerun()
-                                else:
-                                    st.error("Failed to write to WordPress gateway script. Check tokens.")
+                            # IN-APP AUTOMATION: Generate password and app URL string directly
+                            alphabet = string.ascii_uppercase + string.digits
+                            wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                            
+                            # Build the localized Streamlit URL link framework parameters
+                            # NOTE: Change 'localhost' to your live URL when deployed (e.g., https://wheelbuilder.streamlit.app)
+                            base_url = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
+                            wp_link = f"{base_url}/?build={row['id']}"
+                            
+                            updates = {"status": new_s, "wp_page_url": wp_link, "wp_page_password": wp_pass}
+                            base.table("builds").update(row['id'], updates)
+                            update_local_record("builds", row['id'], updates)
+                            st.toast("🎉 Client Web Secure Portal Created inside Streamlit!"); st.rerun()
                         else:
                             base.table("builds").update(row['id'], {"status": new_s})
                             update_local_record("builds", row['id'], {"status": new_s})
@@ -317,17 +303,10 @@ with tabs[0]:
                         with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
                             st.caption("Delivery address for this build")
                             new_addr_input = st.text_area(
-                                "Delivery Address",
-                                value=str(addr_val).strip() if has_addr else "",
-                                placeholder="e.g.\n123 Example Street\nGeorge, Western Cape\n6529\nSouth Africa",
-                                height=120,
-                                key=f"addr_{row['id']}"
+                                "Delivery Address", value=str(addr_val).strip() if has_addr else "", height=120, key=f"addr_{row['id']}"
                             )
                             new_track_input = st.text_input(
-                                "Courier Tracking Link",
-                                value=str(track_val).strip() if has_tracking else "",
-                                placeholder="https://...",
-                                key=f"track_{row['id']}"
+                                "Courier Tracking Link", value=str(track_val).strip() if has_tracking else "", key=f"track_{row['id']}"
                             )
                             if has_tracking:
                                 st.link_button("🔗 Open Tracking Link", str(track_val).strip(), use_container_width=True)
@@ -339,43 +318,8 @@ with tabs[0]:
                     
                     with c_btn3:
                         with st.popover("🖨️ Parts Sheet"):
-                            txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n"
-                            txt += f"====================================\n"
-                            txt += f"CUSTOMER  : {row.get('customer')}\n"
-                            txt += f"DATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\n"
-                            txt += f"SPOKE     : {row.get('spoke', 'None')}\n"
-                            txt += f"NIPPLE    : {row.get('nipple', 'None')}\n"
-                            txt += f"====================================\n\n"
-                            
-                            if row.get('f_rim') and row.get('f_rim') != "None":
-                                txt += f"🔘 FRONT WHEEL CONFIGURATION\n"
-                                txt += f"  - Rim: {row.get('f_rim')}\n"
-                                txt += f"  - Hub: {row.get('f_hub')}\n"
-                                txt += f"  - Left Spokes  : {row.get('f_l')} mm\n"
-                                txt += f"  - Right Spokes : {row.get('f_r')} mm\n\n"
-                                
-                            if row.get('r_rim') and row.get('r_rim') != "None":
-                                txt += f"🔘 REAR WHEEL CONFIGURATION\n"
-                                txt += f"  - Rim: {row.get('r_rim')}\n"
-                                txt += f"  - Hub: {row.get('r_hub')}\n"
-                                txt += f"  - Left Spokes  : {row.get('r_l')} mm\n"
-                                txt += f"  - Right Spokes : {row.get('r_r')} mm\n"
-
-                            if has_addr:
-                                txt += f"\n====================================\n"
-                                txt += f"📮 DELIVERY ADDRESS\n"
-                                txt += f"{str(addr_val).strip()}\n"
-
-                            if has_tracking:
-                                if not has_addr:
-                                    txt += f"\n====================================\n"
-                                txt += f"🔗 TRACKING LINK\n"
-                                txt += f"{str(track_val).strip()}\n"
-
-                            txt += f"===================================="
-                            
+                            txt = f" W_LAB SPEC\nCust: {row.get('customer')}\nRim F: {row.get('f_rim')}\nHub F: {row.get('f_hub')}\nRim R: {row.get('r_rim')}\nHub R: {row.get('r_hub')}"
                             st.code(txt, language="text")
-                            st.download_button("📥 Download Text File", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
 
                 if row.get('wp_page_url'):
                     st.markdown("---")
@@ -397,7 +341,6 @@ with tabs[0]:
                 for _, row in completed_builds.iterrows():
                     with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
                         c_arch1, c_arch2 = st.columns([3, 1])
-                        
                         with c_arch1:
                             if row.get('wp_page_url'):
                                 st.markdown("**📱 Client Handover Kit**")
@@ -409,14 +352,10 @@ with tabs[0]:
                                     f"This page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
                                 )
                                 st.code(client_msg, language="text")
-                            else:
-                                st.info("No WordPress page found for this completed build row.")
-                        
                         with c_arch2:
-                            st.markdown("**⚙️ Configuration**")
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
                                 base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
-                                refresh_api(); st.success("Build reassigned to pipeline!"); st.rerun()
+                                refresh_api(); st.rerun()
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
