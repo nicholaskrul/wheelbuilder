@@ -79,8 +79,8 @@ def get_comp_data(table_key, label):
 
 def create_protected_wp_page(row, f_res, r_res):
     """
-    Production Version: Generates a secure, password-protected build page 
-    on WordPress via the custom root directory wb-gate.php endpoint.
+    Production Version: Generates a premium, password-protected build page 
+    on WordPress matching the exact visual identity of wheelbuilder.co.za
     """
     try:
         if "wordpress" not in st.secrets:
@@ -90,7 +90,7 @@ def create_protected_wp_page(row, f_res, r_res):
         wp_secrets = st.secrets["wordpress"]
         gateway_url = f"{wp_secrets['site_url'].rstrip('/')}/wb-gate.php"
         
-        # Generate random customer access key password
+        # Generate clean customer access password
         alphabet = string.ascii_uppercase + string.digits
         password = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
         
@@ -100,55 +100,88 @@ def create_protected_wp_page(row, f_res, r_res):
         tracking_link = str(row.get('tracking_link', '')).strip()
         invoice_url = str(row.get('invoice_url', '')).strip()
         
-        # Build document container markup
+        # --- PREVENT CRASHES: Safe parsing of float spoke lengths ---
+        def format_len(val):
+            try:
+                return f"{float(val):.1f}" if val and float(val) > 0 else "N/A"
+            except (ValueError, TypeError):
+                return "N/A"
+
+        # --- PREMIUM HTML MARKUP TUNED TO WHEELBUILDER.CO.ZA BRANDING ---
         html_content = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333;">
-            <h2 style="color: #1d72b8; border-bottom: 2px solid #1d72b8; padding-bottom: 8px;">🚲 Your Custom Wheelset Build Sheet</h2>
-            <p>Thank you for choosing Wheelbuilder Lab! Your custom wheelset is complete and ready for the road. Below you will find the verified specs, weights, and logistics tracking for your unique build archive.</p>
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 30px 15px; color: #222; background-color: #ffffff; line-height: 1.7;">
             
-            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                <tr style="background-color: #f2f2f2;"><th style="padding: 10px; text-align: left; border: 1px solid #ddd;" colspan="2">System Overview</th></tr>
-                <tr><td style="padding: 10px; border: 1px solid #ddd;"><strong>Spoke Model</strong></td><td style="padding: 10px; border: 1px solid #ddd;">{spoke_model}</td></tr>
-                <tr><td style="padding: 10px; border: 1px solid #ddd;"><strong>Nipple Model</strong></td><td style="padding: 10px; border: 1px solid #ddd;">{nipple_model}</td></tr>
-                <tr style="font-weight: bold; background-color: #e6f7ff;">
-                    <td style="padding: 10px; border: 1px solid #ddd;">Total Weight Verified</td>
-                    <td style="padding: 10px; border: 1px solid #ddd;">{int(f_res['total'] + r_res['total'])}g</td>
-                </tr>
-            </table>
+            <h1 style="font-size: 26px; font-weight: 700; color: #111; margin-bottom: 20px; letter-spacing: -0.5px; text-transform: uppercase; border-bottom: 3px solid #111; padding-bottom: 12px; margin-top: 0;">
+                Your custom wheelset build sheet
+            </h1>
+            
+            <p style="font-size: 15px; margin-bottom: 18px; color: #333;">
+                Thank you for choosing Wheelbuilder for your custom wheel build! Your wheelset is complete and ready for the road. Below you will find the verified specs, weights, invoice and logistics tracking information.
+            </p>
+            
+            <div style="background-color: #f8f9fa; border-left: 4px solid #111; padding: 16px; margin-bottom: 30px; border-radius: 0 4px 4px 0;">
+                <p style="font-size: 14.5px; margin: 0; font-style: italic; color: #444; font-weight: 500;">
+                    Your wheels come with a lifetime warranty on the workmanship and spokes. If you ever need any support or advice, please get in touch directly.
+                </p>
+            </div>
         """
         
+        # Front Wheel Table Block
         if f_res["exists"]:
             html_content += f"""
-            <h3 style="color: #555; margin-top: 25px;">🔘 Front Wheel Specs</h3>
-            <ul>
-                <li><strong>Rim:</strong> {row.get('f_rim')}</li>
-                <li><strong>Hub:</strong> {row.get('f_hub')}</li>
-                <li><strong>Spoke Lengths:</strong> Left {row.get('f_l')}mm / Right {row.get('f_r')}mm</li>
-                <li><strong>Component Weight:</strong> {int(f_res['total'])}g</li>
-            </ul>
+            <div style="border: 1px solid #eaeaea; border-radius: 6px; padding: 20px; margin-bottom: 24px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.01);">
+                <h2 style="font-size: 16px; font-weight: 700; color: #111; margin-top: 0; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eaeaea; padding-bottom: 8px;">
+                    🔘 Front Wheel Configuration
+                </h2>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14.5px;">
+                    <tr><td style="padding: 6px 0; color: #666; width: 35%;">Rim</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('f_rim')}</td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Hub</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('f_hub')}</td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Spokes</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{spoke_model} <span style="color:#666; font-weight: normal; font-size:13.5px; margin-left: 6px;">(L: {format_len(row.get('f_l'))}mm / R: {format_len(row.get('f_r'))}mm)</span></td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Nipples</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{nipple_model}</td></tr>
+                    <tr><td style="padding: 10px 0 0 0; color: #111; font-weight: 700; border-top: 1px dashed #eaeaea; margin-top: 6px;">Wheel Weight</td><td style="padding: 10px 0 0 0; font-weight: 700; color: #111; border-top: 1px dashed #eaeaea; font-size: 15px;">{int(f_res['total'])}g</td></tr>
+                </table>
+            </div>
             """
             
+        # Rear Wheel Table Block
         if r_res["exists"]:
             html_content += f"""
-            <h3 style="color: #555; margin-top: 25px;">🔘 Rear Wheel Specs</h3>
-            <ul>
-                <li><strong>Rim:</strong> {row.get('r_rim')}</li>
-                <li><strong>Hub:</strong> {row.get('r_hub')}</li>
-                <li><strong>Spoke Lengths:</strong> Left {row.get('r_l')}mm / Right {row.get('r_r')}mm</li>
-                <li><strong>Component Weight:</strong> {int(r_res['total'])}g</li>
-            </ul>
+            <div style="border: 1px solid #eaeaea; border-radius: 6px; padding: 20px; margin-bottom: 24px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.01);">
+                <h2 style="font-size: 16px; font-weight: 700; color: #111; margin-top: 0; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eaeaea; padding-bottom: 8px;">
+                    🔘 Rear Wheel Configuration
+                </h2>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14.5px;">
+                    <tr><td style="padding: 6px 0; color: #666; width: 35%;">Rim</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('r_rim')}</td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Hub</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{row.get('r_hub')}</td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Spokes</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{spoke_model} <span style="color:#666; font-weight: normal; font-size:13.5px; margin-left: 6px;">(L: {format_len(row.get('r_l'))}mm / R: {format_len(row.get('r_r'))}mm)</span></td></tr>
+                    <tr><td style="padding: 6px 0; color: #666;">Nipples</td><td style="padding: 6px 0; font-weight: 600; color: #111;">{nipple_model}</td></tr>
+                    <tr><td style="padding: 10px 0 0 0; color: #111; font-weight: 700; border-top: 1px dashed #eaeaea; margin-top: 6px;">Wheel Weight</td><td style="padding: 10px 0 0 0; font-weight: 700; color: #111; border-top: 1px dashed #eaeaea; font-size: 15px;">{int(r_res['total'])}g</td></tr>
+                </table>
+            </div>
             """
             
-        html_content += "<h3 style='color: #555; margin-top: 25px;'>📦 Documents & Tracking</h3><p>"
-        if invoice_url and invoice_url.lower() not in ["none", "nan"]:
-            html_content += f'<a href="{invoice_url}" target="_blank" style="display: inline-block; padding: 10px 15px; margin-right: 10px; background-color: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📄 View Invoice</a>'
-        if tracking_link and tracking_link.lower() not in ["none", "nan"]:
-            html_content += f'<a href="{tracking_link}" target="_blank" style="display: inline-block; padding: 10px 15px; background-color: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🚚 Track Shipment</a>'
-        html_content += "</p>"
+        # Total Summary Weight Box
+        html_content += f"""
+        <div style="background-color: #111111; color: #ffffff; padding: 18px 20px; border-radius: 6px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #999;">Wheelset Weight Total</span>
+            <span style="font-size: 22px; font-weight: 700; color: #ffffff;">{int(f_res['total'] + r_res['total'])}g</span>
+        </div>
+        """
         
+        # Logistics Actions Buttons
+        html_content += "<div style='margin-bottom: 35px; margin-top: 10px;'>"
+        if invoice_url and invoice_url.lower() not in ["none", "nan"]:
+            html_content += f'<a href="{invoice_url}" target="_blank" style="display: inline-block; padding: 11px 18px; margin-right: 12px; margin-bottom: 10px; border: 2px solid #111; color: #111; background-color: #fff; text-decoration: none; border-radius: 4px; font-weight: 700; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">📄 View Invoice</a>'
+        if tracking_link and tracking_link.lower() not in ["none", "nan"]:
+            html_content += f'<a href="{tracking_link}" target="_blank" style="display: inline-block; padding: 11px 18px; margin-bottom: 10px; background-color: #111; color: #fff; text-decoration: none; border-radius: 4px; font-weight: 700; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">🚚 Track Shipment</a>'
+        html_content += "</div>"
+        
+        # Static Clean Content Gallery Placeholder
         html_content += """
-            <h3 style="color: #555; margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 15px;">📸 Build Gallery</h3>
-            <p style="color: #666; font-style: italic;">Workshop configuration and media gallery uploads will post here directly.</p>
+            <div style="border-top: 1px solid #eaeaea; padding-top: 25px; margin-top: 25px;">
+                <h3 style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; color: #111;">📸 Build Gallery</h3>
+                <p style="color: #666; font-style: italic; font-size: 13.5px; margin: 0;">High-resolution configuration imagery layout and tension profiles will update here shortly.</p>
+            </div>
         </div>
         """
         
@@ -158,16 +191,10 @@ def create_protected_wp_page(row, f_res, r_res):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "X-WB-Token": wp_secrets.get("gateway_token", ""),
-            "Content-Type": "application/json",
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin"
+            "Content-Type": "application/json"
         }
         
         response = requests.post(gateway_url, json=payload, headers=headers, timeout=10)
-        
         if response.status_code == 200:
             return response.json().get("link"), password
         else:
@@ -197,7 +224,7 @@ with tabs[0]:
     else:
         active_mask = df_builds['status'].fillna("Order Received") != "Complete"
         
-        # Case-insensitive alphabetical sorting by first name
+        # Case-insensitive alphabetical sorting by customer first name
         active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
         completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
 
@@ -364,11 +391,10 @@ with tabs[0]:
 
         st.divider()
         
-        # --- 🛠️ UPGRADED: COMPLETED ARCHIVE EXPANSER ECOSYSTEM ---
+        # --- COMPLETED ARCHIVE EXPANSER ECOSYSTEM ---
         with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
             if not completed_builds.empty:
                 for _, row in completed_builds.iterrows():
-                    # Generate an individual sub-expander box for each historical customer entry
                     with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
                         c_arch1, c_arch2 = st.columns([3, 1])
                         
@@ -384,14 +410,13 @@ with tabs[0]:
                                 )
                                 st.code(client_msg, language="text")
                             else:
-                                st.info("No active WordPress portfolio generation data mapped to this historical layout row.")
+                                st.info("No WordPress page found for this completed build row.")
                         
                         with c_arch2:
                             st.markdown("**⚙️ Configuration**")
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
-                                # Reset fields upon reopening so it can regenerate cleanly if closed again later
                                 base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
-                                refresh_api(); st.success("Build reassigned to workspace pipeline!"); st.rerun()
+                                refresh_api(); st.success("Build reassigned to pipeline!"); st.rerun()
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
