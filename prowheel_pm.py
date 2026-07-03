@@ -129,10 +129,11 @@ def render_client_portal(target_build_id):
     st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
     st.divider()
 
-    # Logistics & Feedback CTAs
-    c_btn1, c_btn2, c_btn3 = st.columns([1, 1, 1])
+    # Logistics, Feedback & OneDrive Gallery CTAs
+    c_btn1, c_btn2, c_btn3, c_btn4 = st.columns([1, 1, 1, 1])
     inv_url = str(row.get('invoice_url', '')).strip()
     track_url = str(row.get('tracking_link', '')).strip()
+    gallery_url = str(row.get('gallery_url', '')).strip() # <-- Fetches the OneDrive link
 
     with c_btn1:
         if inv_url and inv_url.lower() not in ['none', 'nan', '']:
@@ -141,12 +142,11 @@ def render_client_portal(target_build_id):
         if track_url and track_url.lower() not in ['none', 'nan', '']:
             st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
-        # --- NEW GOOGLE REVIEW CTA BUTTON ---
+        if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
+            # --- NEW ONEDRIVE GALLERY CTA BUTTON ---
+            st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
+    with c_btn4:
         st.link_button("⭐️ Leave a Google Review", "https://g.page/r/CVj8dcB7IKHrEAE/review", use_container_width=True)
-
-    st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
-    st.stop()
-
 
 # --- 5. INITIAL ROUTING CHECK ---
 if "build" in st.query_params:
