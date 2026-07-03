@@ -7,7 +7,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.16", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.20", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -133,7 +133,7 @@ def render_client_portal(target_build_id):
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns([1, 1, 1, 1])
     inv_url = str(row.get('invoice_url', '')).strip()
     track_url = str(row.get('tracking_link', '')).strip()
-    gallery_url = str(row.get('gallery_url', '')).strip() # <-- Fetches the OneDrive link
+    gallery_url = str(row.get('gallery_url', '')).strip()
 
     with c_btn1:
         if inv_url and inv_url.lower() not in ['none', 'nan', '']:
@@ -143,10 +143,13 @@ def render_client_portal(target_build_id):
             st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
         if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
-            # --- NEW ONEDRIVE GALLERY CTA BUTTON ---
             st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
         st.link_button("⭐️ Leave a Google Review", "https://g.page/r/CVj8dcB7IKHrEAE/review", use_container_width=True)
+
+    st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
+    st.stop()
+
 
 # --- 5. INITIAL ROUTING CHECK ---
 if "build" in st.query_params:
@@ -284,14 +287,18 @@ with tabs[0]:
                     
                     c_btn1, c_btn2, c_btn3 = st.columns(3)
                     with c_btn1:
+                        # --- UPGRADED DETAILS POPOVER WITH ONEDRIVE INPUT ---
                         with st.popover("📝 Details"):
                             fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
                             rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                            gal = st.text_input("OneDrive Gallery URL", value=row.get('gallery_url', ''), placeholder="https://onedrive...", key=f"gal_{row['id']}")
                             nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                            
                             if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
-                                base.table("builds").update(row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                                update_local_record("builds", row['id'], {"f_rim_serial": fs, "r_rim_serial": rs, "notes": nt})
-                                st.toast("Record updated."); st.rerun()
+                                updates = {"f_rim_serial": fs, "r_rim_serial": rs, "gallery_url": gal, "notes": nt}
+                                base.table("builds").update(row['id'], updates)
+                                update_local_record("builds", row['id'], updates)
+                                st.toast("Record details updated."); st.rerun()
 
                     with c_btn2:
                         with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
@@ -377,6 +384,7 @@ with tabs[2]:
     with st.form("reg_form_v18_10"):
         cust = st.text_input("Customer Name")
         inv = st.text_input("Invoice URL")
+        gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
         c_f, c_r = st.columns(2)
         with c_f:
             st.subheader("Front Wheel")
@@ -395,7 +403,7 @@ with tabs[2]:
         
         if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
-                payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv,
+                payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg,
                            "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
