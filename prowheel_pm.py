@@ -202,12 +202,13 @@ def refresh_api():
 
 def update_local_record(table_name, record_id, updates):
     df = st.session_state.data[table_name]
-    if not df.empty && record_id in df['id'].values:
+    # FIXED: Swapped out '&&' for standard Python keyword 'and'
+    if not df.empty and record_id in df['id'].values:
         for key, val in updates.items():
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-# FIXED: Re-injected missing Admin view Header blocks
+
 st.title("🚲 Wheelbuilder Lab v18.20")
 st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
