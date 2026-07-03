@@ -202,12 +202,13 @@ def refresh_api():
 
 def update_local_record(table_name, record_id, updates):
     df = st.session_state.data[table_name]
-    if not df.empty and record_id in df['id'].values:
+    if not df.empty && record_id in df['id'].values:
         for key, val in updates.items():
             df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
-
+# FIXED: Re-injected missing Admin view Header blocks
+st.title("🚲 Wheelbuilder Lab v18.20")
 st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -287,7 +288,6 @@ with tabs[0]:
                     
                     c_btn1, c_btn2, c_btn3 = st.columns(3)
                     with c_btn1:
-                        # --- UPGRADED DETAILS POPOVER WITH ONEDRIVE INPUT ---
                         with st.popover("📝 Details"):
                             fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
                             rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
