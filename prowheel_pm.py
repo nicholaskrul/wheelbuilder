@@ -12,11 +12,13 @@ from pyairtable import Api
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
-WORKSHOP_CAPTION = "Workshop Command Center | Native Callback Autofill Enabled"
+WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
 
 # =========================================================================
-# --- 2. AIRTABLE CONNECTION ENGINE ---
+# --- 2. APP INITIALIZATION & AIRTABLE CONNECTION ENGINE ---
 # =========================================================================
+st.set_page_config(page_title="Wheelbuilder Lab v18.99", layout="wide", page_icon="🚲")
+
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
     BASE_ID = st.secrets["airtable"]["base_id"]
@@ -110,36 +112,7 @@ def fetch_master_bundle():
     return bundle
 
 # =========================================================================
-# --- 4. NATIVE STATE BACKGROUND CALLBACK CONTROLLERS ---
-# =========================================================================
-def sync_front_recipe_autofill():
-    """Triggered instantly when Front Rim or Front Hub drops down modify state."""
-    df_recipes = st.session_state.data.get("spoke_db", pd.DataFrame())
-    fr = st.session_state.get("reg_fr", "None")
-    fh = st.session_state.get("reg_fh", "None")
-    if fr != "None" and fh != "None" and not df_recipes.empty:
-        match = df_recipes[df_recipes['label'] == f"{fr} | {fh}"]
-        if not match.empty:
-            st.session_state.reg_fl = safe_float(match.iloc[0].get('len_l', 0.0))
-            st.session_state.reg_fr_len = safe_float(match.iloc[0].get('len_r', 0.0))
-            return
-    st.session_state.reg_fl, st.session_state.reg_fr_len = 0.0, 0.0
-
-def sync_rear_recipe_autofill():
-    """Triggered instantly when Rear Rim or Rear Hub drops down modify state."""
-    df_recipes = st.session_state.data.get("spoke_db", pd.DataFrame())
-    rr = st.session_state.get("reg_rr", "None")
-    rh = st.session_state.get("reg_rh", "None")
-    if rr != "None" and rh != "None" and not df_recipes.empty:
-        match = df_recipes[df_recipes['label'] == f"{rr} | {rh}"]
-        if not match.empty:
-            st.session_state.reg_rl = safe_float(match.iloc[0].get('len_l', 0.0))
-            st.session_state.reg_rr_len = safe_float(match.iloc[0].get('len_r', 0.0))
-            return
-    st.session_state.reg_rl, st.session_state.reg_rr_len = 0.0, 0.0
-
-# =========================================================================
-# --- 5. FUNCTIONAL PAGE MODULES ---
+# --- 4. FUNCTIONAL PAGE MODULES ---
 # =========================================================================
 
 def render_client_portal():
@@ -218,14 +191,11 @@ def render_client_portal():
     gallery_url = str(row.get('gallery_url', '')).strip()
 
     with c_btn1:
-        if inv_url and inv_url.lower() not in ['none', 'nan', '']: 
-            st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
+        if inv_url and inv_url.lower() not in ['none', 'nan', '']: st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
     with c_btn2:
-        if track_url and track_url.lower() not in ['none', 'nan', '']: 
-            st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
+        if track_url and track_url.lower() not in ['none', 'nan', '']: st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
-        if gallery_url and gallery_url.lower() not in ['none', 'nan', '']: 
-            st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
+        if gallery_url and gallery_url.lower() not in ['none', 'nan', '']: st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
         st.link_button("⭐️ Leave a Google Review", GOOGLE_REVIEW_URL, use_container_width=True)
 
@@ -392,7 +362,7 @@ def render_admin_pipeline():
             st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
 
     # =========================================================================
-    # --- TAB 3: STABLE CALLBACK ENTRY REGISTRY (NO RESET HOOKS) ---
+    # --- TAB 3: PURE FORMLESS INTERACTIVE REGISTRY PANEL (ZERO RESET RISKS) ---
     # =========================================================================
     with tabs[2]:
         st.header("📝 Register New Build")
@@ -403,71 +373,80 @@ def render_admin_pipeline():
         hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
+        df_recipes = st.session_state.data["spoke_db"]
 
-        # --- A. INITIALIZE STABLE BACKGROUND STATE REGISTRIES ---
-        if "reg_cust" not in st.session_state: st.session_state.reg_cust = ""
-        if "reg_inv" not in st.session_state: st.session_state.reg_inv = ""
-        if "reg_gal" not in st.session_state: st.session_state.reg_gal = ""
-        if "reg_fl" not in st.session_state: st.session_state.reg_fl = 0.0
-        if "reg_fr_len" not in st.session_state: st.session_state.reg_fr_len = 0.0
-        if "reg_rl" not in st.session_state: st.session_state.reg_rl = 0.0
-        if "reg_rr_len" not in st.session_state: st.session_state.reg_rr_len = 0.0
-        if "reg_notes" not in st.session_state: st.session_state.reg_notes = ""
-
-        # Global Non-Form Metadata Inputs
-        st.text_input("Customer Name", key="reg_cust")
-        st.text_input("Invoice URL", key="reg_inv")
-        st.text_input("OneDrive Gallery URL (Optional)", key="reg_gal")
+        # 1. Core metadata variables are bound to persistent backend memory keys (WILL NEVER RESET)
+        cust = st.text_input("Customer Name", key="stable_cust")
+        inv = st.text_input("Invoice URL", key="stable_inv")
+        gal_reg = st.text_input("OneDrive Gallery URL (Optional)", key="stable_gal")
 
         c_f, c_r = st.columns(2)
         with c_f:
-            st.markdown("#### 🔘 Front Wheel System")
-            # Dropping these down updates only the session state keys in memory natively!
-            st.selectbox("Front Rim Model", rim_opts, key="reg_fr", on_change=sync_front_recipe_autofill)
-            st.selectbox("Front Hub Model", hub_opts, key="reg_fh", on_change=sync_front_recipe_autofill)
-            st.number_input("Left Spoke Length (mm)", step=0.1, key="reg_fl")
-            st.number_input("Right Spoke Length (mm)", step=0.1, key="reg_fr_len")
+            st.markdown("#### 🔘 Front Wheel Configuration")
+            fr_rim = st.selectbox("Front Rim Model", rim_opts, key="stable_fr")
+            fr_hub = st.selectbox("Front Hub Model", hub_opts, key="stable_fh")
+            
+            # Instant memory lookups parse local bundle calculations effortlessly
+            default_fl, default_fr = 0.0, 0.0
+            if fr_rim != "None" and fr_hub != "None":
+                f_combo = f"{fr_rim} | {fr_hub}"
+                f_match = df_recipes[df_recipes['label'] == f_combo] if not df_recipes.empty else pd.DataFrame()
+                if not f_match.empty:
+                    default_fl = safe_float(f_match.iloc[0].get('len_l', 0.0))
+                    default_fr = safe_float(f_match.iloc[0].get('len_r', 0.0))
+                    st.success(f"✨ Front Match: L: {default_fl}mm / R: {default_fr}mm")
+            
+            # Dynamic widget keys force a precise frontend redraw loop matching default recipes
+            fl_len = st.number_input("Left Spoke Length (mm)", value=default_fl, step=0.1, key=f"dyn_fl_{fr_rim}_{fr_hub}")
+            fr_len = st.number_input("Right Spoke Length (mm)", value=default_fr, step=0.1, key=f"dyn_fr_{fr_rim}_{fr_hub}")
             
         with c_r:
-            st.markdown("#### 🔘 Rear Wheel System")
-            st.selectbox("Rear Rim Model", rim_opts, key="reg_rr", on_change=sync_rear_recipe_autofill)
-            st.selectbox("Rear Hub Model", hub_opts, key="reg_rh", on_change=sync_rear_recipe_autofill)
-            st.number_input("Left Spoke Length (mm) ", step=0.1, key="reg_rl")
-            st.number_input("Right Spoke Length (mm) ", step=0.1, key="reg_rr_len")
+            st.markdown("#### 🔘 Rear Wheel Configuration")
+            rr_rim = st.selectbox("Rear Rim Model", rim_opts, key="stable_rr")
+            rr_hub = st.selectbox("Rear Hub Model", hub_opts, key="stable_rh")
+            
+            default_rl, default_rr = 0.0, 0.0
+            if rr_rim != "None" and rr_hub != "None":
+                r_combo = f"{rr_rim} | {rr_hub}"
+                r_match = df_recipes[df_recipes['label'] == r_combo] if not df_recipes.empty else pd.DataFrame()
+                if not r_match.empty:
+                    default_rl = safe_float(r_match.iloc[0].get('len_l', 0.0))
+                    default_rr = safe_float(r_match.iloc[0].get('len_r', 0.0))
+                    st.success(f"✨ Rear Match: L: {default_rl}mm / R: {default_rr}mm")
+                    
+            rl_len = st.number_input("Left Spoke Length (mm) ", value=default_rl, step=0.1, key=f"dyn_rl_{rr_rim}_{rr_hub}")
+            rr_len = st.number_input("Right Spoke Length (mm) ", value=default_rr, step=0.1, key=f"dyn_rr_{rr_rim}_{rr_hub}")
 
-        st.selectbox("Spoke Model Selection", spoke_opts, key="reg_spk")
-        st.selectbox("Nipple Model Selection", nipple_opts, key="reg_nip")
-        st.text_area("Workshop Build Notes", key="reg_notes")
+        spk = st.selectbox("Spoke Model Selection", spoke_opts, key="stable_spk")
+        nip = st.selectbox("Nipple Model Selection", nipple_opts, key="stable_nip")
+        notes = st.text_area("Workshop Build Notes", key="stable_notes")
         
         if st.button("🚀 Finalize & Register Build to Pipeline", use_container_width=True):
-            if st.session_state.reg_cust:
+            if cust:
                 payload = {
-                    "customer": st.session_state.reg_cust,
+                    "customer": cust,
                     "date": datetime.now().strftime("%Y-%m-%d"),
                     "status": "Order Received",
-                    "invoice_url": st.session_state.reg_inv,
-                    "gallery_url": st.session_state.reg_gal,
-                    "f_rim": st.session_state.reg_fr,
-                    "f_hub": st.session_state.reg_fh,
-                    "f_l": st.session_state.reg_fl,
-                    "f_r": st.session_state.reg_fr_len,
-                    "r_rim": st.session_state.reg_rr,
-                    "r_hub": st.session_state.reg_rh,
-                    "r_l": st.session_state.reg_rl,
-                    "r_r": st.session_state.reg_rr_len,
-                    "spoke": st.session_state.get("reg_spk", "None"),
-                    "nipple": st.session_state.get("reg_nip", "None"),
-                    "notes": st.session_state.reg_notes
+                    "invoice_url": inv,
+                    "gallery_url": gal_reg,
+                    "f_rim": fr_rim,
+                    "f_hub": fr_hub,
+                    "f_l": fl_len,
+                    "f_r": fr_len,
+                    "r_rim": rr_rim,
+                    "r_hub": rr_hub,
+                    "r_l": rl_len,
+                    "r_r": rr_len,
+                    "spoke": spk,
+                    "nipple": nip,
+                    "notes": notes
                 }
                 base.table("builds").create(payload)
                 db_table = base.table("spoke_db")
                 df_rims = st.session_state.data["rims"]
                 df_hubs = st.session_state.data["hubs"]
                 
-                for r, h, l, rr in [
-                    (st.session_state.reg_fr, st.session_state.reg_fh, st.session_state.reg_fl, st.session_state.reg_fr_len), 
-                    (st.session_state.reg_rr, st.session_state.reg_rh, st.session_state.reg_rl, st.session_state.reg_rr_len)
-                ]:
+                for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                     if r != "None" and h != "None" and l > 0:
                         matched_rim = df_rims[df_rims['label'] == r]
                         matched_hub = df_hubs[df_hubs['label'] == h]
@@ -480,19 +459,17 @@ def render_admin_pipeline():
                             if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
                             else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
                 
-                # Dynamic clean slate flush reset routing routine
-                st.session_state.reg_cust = ""
-                st.session_state.reg_inv = ""
-                st.session_state.reg_gal = ""
-                st.session_state.reg_fr = "None"
-                st.session_state.reg_fh = "None"
-                st.session_state.reg_fl = 0.0
-                st.session_state.reg_fr_len = 0.0
-                st.session_state.reg_rr = "None"
-                st.session_state.reg_rh = "None"
-                st.session_state.reg_rl = 0.0
-                st.session_state.reg_rr_len = 0.0
-                st.session_state.reg_notes = ""
+                # Formless submission cleans memory trackers manually on validation success
+                st.session_state.stable_cust = ""
+                st.session_state.stable_inv = ""
+                st.session_state.stable_gal = ""
+                st.session_state.stable_fr = "None"
+                st.session_state.stable_fh = "None"
+                st.session_state.stable_rr = "None"
+                st.session_state.stable_rh = "None"
+                st.session_state.stable_spk = "None"
+                st.session_state.stable_nip = "None"
+                st.session_state.stable_notes = ""
                 
                 refresh_api(); st.success("Registered successfully!"); st.rerun()
             else:
@@ -518,7 +495,7 @@ def render_admin_pipeline():
         if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
 
 # =========================================================================
-# --- 6. MODERN SYSTEM ROUTING DISPATCHER ---
+# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
 # =========================================================================
 st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
 
