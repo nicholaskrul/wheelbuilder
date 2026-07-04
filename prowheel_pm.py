@@ -191,7 +191,8 @@ def render_client_portal():
     with c_btn1:
         if inv_url and inv_url.lower() not in ['none', 'nan', '']: st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
     with c_btn2:
-        if track_url wildlife and track_url.lower() not in ['none', 'nan', '']: st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
+        # FIXED: Removed the rogue 'wildlife' syntax blocker string here
+        if track_url and track_url.lower() not in ['none', 'nan', '']: st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
         if gallery_url and gallery_url.lower() not in ['none', 'nan', '']: st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
@@ -373,7 +374,7 @@ def render_admin_pipeline():
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
         df_recipes = st.session_state.data["spoke_db"]
 
-        # --- STEP A: REAL-TIME COMPONENT DROPDOWNS (OUTSIDE FORM) ---
+        # Real-time Dropdowns outside the form wrapper stay highly responsive
         st.markdown("### 🔍 Step 1: Select Rims & Hubs")
         c_sel1, c_sel2 = st.columns(2)
         with c_sel1:
@@ -383,7 +384,6 @@ def render_admin_pipeline():
             rr_rim = st.selectbox("Rear Rim Model", rim_opts, key="reg_rr")
             rr_hub = st.selectbox("Rear Hub Model", hub_opts, key="reg_rh")
 
-        # Dynamic backend checks populate default float bounds immediately on dropdown rerun
         default_fl, default_fr = 0.0, 0.0
         if fr_rim != "None" and fr_hub != "None":
             f_combo = f"{fr_rim} | {fr_hub}"
@@ -404,8 +404,6 @@ def render_admin_pipeline():
 
         st.markdown("### 📝 Step 2: Complete Build Metadata")
         
-        # --- STEP B: THE TRANSACTION SECURE FORM ---
-        # Component keys match unique combinations to force local UI redraw loops safely
         with st.form(f"build_registration_form_{fr_rim}_{fr_hub}_{rr_rim}_{rr_hub}"):
             cust = st.text_input("Customer Name")
             inv = st.text_input("Invoice URL")
@@ -427,55 +425,4 @@ def render_admin_pipeline():
             
             if st.form_submit_button("🚀 Finalize & Register Build to Pipeline"):
                 if cust:
-                    payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
-                    base.table("builds").create(payload)
-                    db_table = base.table("spoke_db")
-                    df_rims = st.session_state.data["rims"]
-                    df_hubs = st.session_state.data["hubs"]
-                    
-                    for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
-                        if r != "None" and h != "None" and l > 0:
-                            matched_rim = df_rims[df_rims['label'] == r]
-                            matched_hub = df_hubs[df_hubs['label'] == h]
-                            
-                            if not matched_rim.empty and not matched_hub.empty:
-                                rd_id = matched_rim['id'].values[0]
-                                hd_id = matched_hub['id'].values[0]
-                                fp = f"{r} | {h}".replace("'", "\\'")
-                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                    refresh_api(); st.success("Registered successfully!"); st.rerun()
-                else:
-                    st.error("Please fill in the Customer Name before finalizing the entry.")
-
-    with tabs[3]:
-        st.header("📦 Library Management")
-        with st.expander("➕ Add New Component"):
-            cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v18_10"):
-                name = st.text_input("Name")
-                c1, c2 = st.columns(2)
-                p = {}
-                if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD"), "holes": c2.number_input("Holes", value=28), "weight": st.number_input("Weight")}
-                elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
-                else: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
-                if st.form_submit_button("Save to Database"):
-                    if name: 
-                        base.table(f"{cat.lower()}s").create(p)
-                        refresh_api(); st.success("Added!"); st.rerun()
-        v_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
-        df_lib = st.session_state.data[v_cat]
-        if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
-
-# =========================================================================
-# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
-# =========================================================================
-st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
-
-if "build" in st.query_params:
-    active_page = st.Page(render_client_portal, title="Client Portal", icon="🚲")
-else:
-    active_page = st.Page(render_admin_pipeline, title="Admin Dashboard", icon="⚙️")
-
-st.navigation([active_page], position="hidden").run()
+                    payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_
