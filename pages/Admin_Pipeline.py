@@ -9,7 +9,6 @@ from pyairtable import Api
 # --- 1. CONFIGURATION & ISOLATED AUTH GATE ---
 st.set_page_config(page_title="Admin Pipeline", layout="wide", page_icon="⚙️")
 
-# Global Settings
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 CACHE_DATA_TTL = 3600  
 WORKSHOP_CAPTION = "Workshop Command Center | Native Multi-Page Environment Enabled"
@@ -29,7 +28,7 @@ if not st.session_state.admin_authenticated:
             try:
                 master_key = st.secrets["admin"]["password"]
             except Exception:
-                st.error("❌ Configuration Error: 'admin' block password missing from secrets configuration file.")
+                st.error("❌ Configuration Error: 'admin' block password payload missing from secrets.")
                 st.stop()
                 
             if user_entered_password == master_key:
@@ -117,7 +116,8 @@ def refresh_api():
 def update_local_record(table_name, record_id, updates):
     df = st.session_state.data[table_name]
     if not df.empty and record_id in df['id'].values:
-        for key, val in updates.items(): df.loc[df['id'] == record_id, key] = val
+        for key, val in updates.items(): 
+            df.loc[df['id'] == record_id, key] = val
         st.session_state.data[table_name] = df
 
 # --- 4. ADMIN DASHBOARD TABS ENGINE ---
@@ -129,7 +129,8 @@ with tabs[0]:
     c_head, c_sync = st.columns([5, 1])
     with c_head: st.subheader("🏁 Workshop Pipeline")
     with c_sync:
-        if st.button("🔄 Force Sync", use_container_width=True): refresh_api(); st.rerun()
+        if st.button("🔄 Force Sync", use_container_width=True): 
+            refresh_api(); st.rerun()
 
     df_builds = st.session_state.data["builds"]
     if df_builds.empty:
@@ -288,7 +289,7 @@ with tabs[2]:
         
         if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
-                payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "fr": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
+                payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
                 db_table = base.table("spoke_db")
                 df_rims = st.session_state.data["rims"]
