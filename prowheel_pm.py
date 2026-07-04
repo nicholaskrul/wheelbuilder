@@ -9,22 +9,15 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR APP CONTROL PANEL) ---
 # =========================================================================
-# Update this domain if your live Streamlit Cloud repository URL address changes
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
-
-# External Customer-Facing Routing Redirect Destinations
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
-
-# Data Fetching Engine Controls (Time-To-Live in seconds)
-CACHE_DATA_TTL = 3600  # 1 hour database cache lifetime protection lock
-
-# Branding Settings
+CACHE_DATA_TTL = 3600  
 WORKSHOP_CAPTION = "Workshop Command Center | Native Secure Customer Portals Enabled"
 
 # =========================================================================
 # --- 2. APP INITIALIZATION & AIRTABLE CORE ENGINE ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab v18.30", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.40", layout="wide", page_icon="🚲")
 
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
@@ -68,10 +61,11 @@ def calculate_wheel_weights(row, bundle):
         
     return f_res, r_res
 
-# --- 4. CLIENT PORTAL RENDER ENGINE (SNAPSHOT DRIVEN) ---
+# --- 4. CLIENT PORTAL RENDER ENGINE (SNAPSHOT & AUTH TRACKED) ---
 def render_client_portal(target_build_id):
     """
-    Optimized Snapshot Layout Profile: Uses decoupled flat column data strings.
+    Upgraded Portal Engine: Implements native Streamlit session locks.
+    Prevents authentication expiration errors on mobile browsers.
     """
     try:
         with st.spinner("Loading secure build profile..."):
@@ -87,23 +81,33 @@ def render_client_portal(target_build_id):
     st.markdown("<p style='text-align: center; color: #666;'>Secure Client Verification Portal</p>", unsafe_allow_html=True)
     st.divider()
 
-    # Password Gate
-    correct_password = row.get("wp_page_password")
-    if isinstance(correct_password, float) or not correct_password or str(correct_password).lower() in ["none", "nan"]:
-        st.warning("This build sheet has not been assigned a secure access key yet. Please contact the workshop.")
-        st.stop()
+    # --- IMPLEMENT RE-RUN PERSISTENT SESSION TRACKING ---
+    auth_session_key = f"auth_{target_build_id}"
+    if auth_session_key not in st.session_state:
+        st.session_state[auth_session_key] = False
 
-    c_pass, _ = st.columns([2, 3])
-    with c_pass:
-        user_input = st.text_input("🔑 Enter your Build Passkey:", type="password", help="Provided to you via WhatsApp or Email")
-        
-    if not user_input:
-        st.info("Please enter the passkey sent to you to unlock your custom build metrics.")
-        st.stop()
-        
-    if user_input.strip() != str(correct_password).strip():
-        st.error("❌ Incorrect passkey. Please double-check your records.")
-        st.stop()
+    # Check if the user needs to log in
+    if not st.session_state[auth_session_key]:
+        correct_password = row.get("wp_page_password")
+        if isinstance(correct_password, float) or not correct_password or str(correct_password).lower() in ["none", "nan"]:
+            st.warning("This build sheet has not been assigned a secure access key yet. Please contact the workshop.")
+            st.stop()
+
+        c_pass, _ = st.columns([2, 3])
+        with c_pass:
+            user_input = st.text_input("🔑 Enter your Build Passkey:", type="password", help="Provided to you via WhatsApp or Email")
+            
+        if not user_input:
+            st.info("Please enter the passkey sent to you to unlock your custom build metrics.")
+            st.stop()
+            
+        if user_input.strip() != str(correct_password).strip():
+            st.error("❌ Incorrect passkey. Please double-check your records.")
+            st.stop()
+            
+        # Authentication success: lock the session open and redraw layout safely
+        st.session_state[auth_session_key] = True
+        st.rerun()
 
     # Read Snapshot Weights compiled on the Admin compilation interface
     f_weight_snapshot = int(row.get("f_weight", 0))
@@ -112,7 +116,6 @@ def render_client_portal(target_build_id):
     f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None" and f_weight_snapshot > 0
     r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None" and r_weight_snapshot > 0
 
-    st.balloons()
     st.markdown(f"## Your Custom Wheelset Build Sheet")
     st.markdown(f"**Client Profile:** {row.get('customer')} | **Completion Date:** {row.get('date')}")
     st.write("Thank you for choosing Wheelbuilder for your custom wheel build! Your wheelset is complete and ready for the road. Below you will find the verified specs, weights, invoice and logistics tracking information.")
@@ -158,7 +161,6 @@ def render_client_portal(target_build_id):
         if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
             st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
-        # Dynamically pulls review destination from the global variable constant configuration block
         st.link_button("⭐️ Leave a Google Review", GOOGLE_REVIEW_URL, use_container_width=True)
 
     st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
@@ -174,7 +176,6 @@ if "build" in st.query_params:
 # --- 6. ADMIN DASHBOARD ROUTE ---
 # =========================================================================
 
-# The data fetch engine now maps its Spinner allocation directly to your global configurations
 @st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
     tables = {
@@ -223,7 +224,7 @@ def update_local_record(table_name, record_id, updates):
         st.session_state.data[table_name] = df
 
 
-st.title("🚲 Wheelbuilder Lab v18.30")
+st.title("🚲 Wheelbuilder Lab v18.40")
 st.caption(WORKSHOP_CAPTION)
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
