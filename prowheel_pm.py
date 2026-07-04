@@ -202,7 +202,6 @@ def refresh_api():
 
 def update_local_record(table_name, record_id, updates):
     df = st.session_state.data[table_name]
-    # FIXED: Swapped out '&&' for standard Python keyword 'and'
     if not df.empty and record_id in df['id'].values:
         for key, val in updates.items():
             df.loc[df['id'] == record_id, key] = val
@@ -319,9 +318,46 @@ with tabs[0]:
                                 st.toast("Delivery info saved."); st.rerun()
                     
                     with c_btn3:
+                        # --- UPGRADED: FULL SPEC SHEET PRINT LAYOUT CORRECTION ---
                         with st.popover("🖨️ Parts Sheet"):
-                            txt = f" W_LAB SPEC\nCust: {row.get('customer')}\nRim F: {row.get('f_rim')}\nHub F: {row.get('f_hub')}\nRim R: {row.get('r_rim')}\nHub R: {row.get('r_hub')}"
+                            def clean_len(val):
+                                try:
+                                    return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
+                                except (ValueError, TypeError):
+                                    return "0.0"
+                                    
+                            txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n"
+                            txt += f"====================================\n"
+                            txt += f"CUSTOMER  : {row.get('customer')}\n"
+                            txt += f"DATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\n"
+                            txt += f"SPOKE     : {row.get('spoke', 'None')}\n"
+                            txt += f"NIPPLE    : {row.get('nipple', 'None')}\n"
+                            txt += f"====================================\n"
+                            
+                            if f_res["exists"]:
+                                txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n"
+                                txt += f"  - Rim: {row.get('f_rim')}\n"
+                                txt += f"  - Hub: {row.get('f_hub')}\n"
+                                txt += f"  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n"
+                                txt += f"  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
+                                
+                            if r_res["exists"]:
+                                txt += f"\n🔘 REAR WHEEL CONFIGURATION\n"
+                                txt += f"  - Rim: {row.get('r_rim')}\n"
+                                txt += f"  - Hub: {row.get('r_hub')}\n"
+                                txt += f"  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n"
+                                txt += f"  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
+                            
+                            txt += f"===================================="
+                            
                             st.code(txt, language="text")
+                            st.download_button(
+                                label="📥 Download Parts Sheet",
+                                data=txt,
+                                file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt",
+                                mime="text/plain",
+                                use_container_width=True
+                            )
 
                 wp_url_val = row.get('wp_page_url')
                 if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
@@ -405,7 +441,7 @@ with tabs[2]:
         if st.form_submit_button("🚀 Finalize & Register Build"):
             if cust:
                 payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg,
-                           "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
+                           "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "fr": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len,
                            "spoke": spk, "nipple": nip, "notes": notes}
                 base.table("builds").create(payload)
 
