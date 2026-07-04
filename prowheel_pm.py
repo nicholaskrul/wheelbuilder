@@ -7,7 +7,7 @@ from datetime import datetime
 from pyairtable import Api
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.20", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.21", layout="wide", page_icon="🚲")
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -208,7 +208,7 @@ def update_local_record(table_name, record_id, updates):
         st.session_state.data[table_name] = df
 
 
-st.title("🚲 Wheelbuilder Lab v18.20")
+st.title("🚲 Wheelbuilder Lab v18.21")
 st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -277,7 +277,13 @@ with tabs[0]:
                             base_url = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
                             wp_link = f"{base_url}/?build={row['id']}"
                             
-                            updates = {"status": new_s, "wp_page_url": wp_link, "wp_page_password": wp_pass}
+                            # AUTOMATION FIX: Inject the exact current timestamp into 'date' field to capture completion
+                            updates = {
+                                "status": new_s, 
+                                "wp_page_url": wp_link, 
+                                "wp_page_password": wp_pass,
+                                "date": datetime.now().strftime("%Y-%m-%d")
+                            }
                             base.table("builds").update(row['id'], updates)
                             update_local_record("builds", row['id'], updates)
                             st.toast("🎉 Client Web Secure Portal Created inside Streamlit!"); st.rerun()
@@ -318,7 +324,6 @@ with tabs[0]:
                                 st.toast("Delivery info saved."); st.rerun()
                     
                     with c_btn3:
-                        # --- UPGRADED: FULL SPEC SHEET PRINT LAYOUT CORRECTION ---
                         with st.popover("🖨️ Parts Sheet"):
                             def clean_len(val):
                                 try:
