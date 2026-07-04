@@ -12,9 +12,11 @@ from pyairtable import Api
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
-WORKSHOP_CAPTION = "Workshop Command Center | Native Page Objects Enabled"
+WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
 
+# =========================================================================
 # --- 2. AIRTABLE CONNECTION ENGINE ---
+# =========================================================================
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
     BASE_ID = st.secrets["airtable"]["base_id"]
@@ -24,7 +26,23 @@ except Exception:
     st.error("❌ Airtable Connection Error: Check your Streamlit Secrets.")
     st.stop()
 
-# --- 3. CORE ANALYTICS HELPERS ---
+# =========================================================================
+# --- 3. CORE ANALYTICS & DEFENSIVE PROGRAMMING HELPERS ---
+# =========================================================================
+def safe_float(val, default=0.0):
+    """Defensive Engine: Prevents application crashes from bad alphanumeric data entries."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        # Fallback if a user types strings like "450g" into a numeric column
+        clean_str = ''.join(c for c in str(val) if c.isdigit() or c == '.')
+        try:
+            return float(clean_str) if clean_str else default
+        except ValueError:
+            return default
+
 def get_comp_data_from_bundle(bundle, table_key, label):
     if not label or label == "None": return {}
     df = bundle.get(table_key, pd.DataFrame())
@@ -33,25 +51,35 @@ def get_comp_data_from_bundle(bundle, table_key, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 def calculate_wheel_weights(row, bundle):
+    """Calculates weights dynamically using defensive type-safe parsing engines"""
     spk_data = get_comp_data_from_bundle(bundle, "spokes", row.get('spoke'))
     nip_data = get_comp_data_from_bundle(bundle, "nipples", row.get('nipple'))
-    u_spk = float(spk_data.get('weight', 0))
-    u_nip = float(nip_data.get('weight', 0))
+    
+    u_spk = safe_float(spk_data.get('weight', 0))
+    u_nip = safe_float(nip_data.get('weight', 0))
 
     f_res = {"total": 0.0, "exists": False}
     if row.get('f_rim') and row.get('f_rim') != "None":
         frd = get_comp_data_from_bundle(bundle, "rims", row.get('f_rim'))
         fhd = get_comp_data_from_bundle(bundle, "hubs", row.get('f_hub'))
-        h = int(frd.get('holes', 0))
-        f_res.update({"exists": True, "rim_w": float(frd.get('weight', 0)), "hub_w": float(fhd.get('weight', 0))})
+        h = int(safe_float(frd.get('holes', 0)))
+        f_res.update({
+            "exists": True, 
+            "rim_w": safe_float(frd.get('weight', 0)), 
+            "hub_w": safe_float(fhd.get('weight', 0))
+        })
         f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
 
     r_res = {"total": 0.0, "exists": False}
     if row.get('r_rim') and row.get('r_rim') != "None":
         rrd = get_comp_data_from_bundle(bundle, "rims", row.get('r_rim'))
         rhd = get_comp_data_from_bundle(bundle, "hubs", row.get('r_hub'))
-        h = int(rrd.get('holes', 0))
-        r_res.update({"exists": True, "rim_w": float(rrd.get('weight', 0)), "hub_w": float(rhd.get('weight', 0))})
+        h = int(safe_float(rrd.get('holes', 0)))
+        r_res.update({
+            "exists": True, 
+            "rim_w": safe_float(rrd.get('weight', 0)), 
+            "hub_w": safe_float(rhd.get('weight', 0))
+        })
         r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
         
     return f_res, r_res
@@ -70,7 +98,8 @@ def fetch_master_bundle():
             for rec in records:
                 fields = rec['fields']
                 fields['id'] = rec['id']
-                if label_col in fields: fields['label'] = str(fields[label_col]).strip()
+                if label_col in fields: 
+                    fields['label'] = str(fields[label_col]).strip()
                 data.append(fields)
             df = pd.DataFrame(data)
             for col in df.columns:
@@ -156,7 +185,9 @@ def render_client_portal():
     st.divider()
 
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns([1, 1, 1, 1])
-    inv_url, track_url, gallery_url = str(row.get('invoice_url', '')).strip(), str(row.get('tracking_link', '')).strip(), str(row.get('gallery_url', '')).strip()
+    inv_url = str(row.get('invoice_url', '')).strip()
+    track_url = str(row.get('tracking_link', '')).strip()
+    gallery_url = str(row.get('gallery_url', '')).strip()
 
     with c_btn1:
         if inv_url and inv_url.lower() not in ['none', 'nan', '']: st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
@@ -186,7 +217,6 @@ def render_admin_pipeline():
                 else: st.error("❌ Invalid Password.")
         return
 
-    # Initialize Administrative Cache Engine Data
     if 'data' not in st.session_state: st.session_state.data = fetch_master_bundle()
     def refresh_api():
         st.cache_data.clear()
@@ -367,12 +397,17 @@ def render_admin_pipeline():
                     df_hubs = st.session_state.data["hubs"]
                     for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                         if r != "None" and h != "None" and l > 0:
-                            rd_id = df_rims[df_rims['label'] == r]['id'].values[0]
-                            hd_id = df_hubs[df_hubs['label'] == h]['id'].values[0]
-                            fp = f"{r} | {h}".replace("'", "\\'")
-                            exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                            if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                            else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                            # --- UPGRADED: DEFENSIVE CHECK PATTERNS PREVENT INDEXERRORS ---
+                            matched_rim = df_rims[df_rims['label'] == r]
+                            matched_hub = df_hubs[df_hubs['label'] == h]
+                            
+                            if not matched_rim.empty and not matched_hub.empty:
+                                rd_id = matched_rim['id'].values[0]
+                                hd_id = matched_hub['id'].values[0]
+                                fp = f"{r} | {h}".replace("'", "\\'")
+                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
+                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
+                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
                     refresh_api(); st.success("Registered!"); st.rerun()
 
     with tabs[3]:
@@ -394,11 +429,9 @@ def render_admin_pipeline():
         df_lib = st.session_state.data[v_cat]
         if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
 
-
 # =========================================================================
-# --- 5. MODERN SYSTEM ROUTING DISPATCHER (ZERO-BUG LAYOUT) ---
+# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
 # =========================================================================
-# Hides standard navigation components from client view rendering windows
 st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
 
 if "build" in st.query_params:
@@ -406,5 +439,4 @@ if "build" in st.query_params:
 else:
     active_page = st.Page(render_admin_pipeline, title="Admin Dashboard", icon="⚙️")
 
-# Fires the active configuration layout instantly
 st.navigation([active_page], position="hidden").run()
