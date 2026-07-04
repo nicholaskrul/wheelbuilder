@@ -6,13 +6,26 @@ import string
 from datetime import datetime
 from pyairtable import Api
 
-# --- 1. GLOBAL SYSTEM CONFIGURATIONS ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.25", layout="wide", page_icon="🚲")
-
-# Update this to your live production domain when running live on Streamlit Cloud
+# =========================================================================
+# --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR APP CONTROL PANEL) ---
+# =========================================================================
+# Update this domain if your live Streamlit Cloud repository URL address changes
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 
-# --- 2. AIRTABLE CONNECTION ---
+# External Customer-Facing Routing Redirect Destinations
+GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
+
+# Data Fetching Engine Controls (Time-To-Live in seconds)
+CACHE_DATA_TTL = 3600  # 1 hour database cache lifetime protection lock
+
+# Branding Settings
+WORKSHOP_CAPTION = "Workshop Command Center | Native Secure Customer Portals Enabled"
+
+# =========================================================================
+# --- 2. APP INITIALIZATION & AIRTABLE CORE ENGINE ---
+# =========================================================================
+st.set_page_config(page_title="Wheelbuilder Lab v18.30", layout="wide", page_icon="🚲")
+
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
     BASE_ID = st.secrets["airtable"]["base_id"]
@@ -58,8 +71,7 @@ def calculate_wheel_weights(row, bundle):
 # --- 4. CLIENT PORTAL RENDER ENGINE (SNAPSHOT DRIVEN) ---
 def render_client_portal(target_build_id):
     """
-    Optimized Version: Uses flat snapshot weight fields directly from the row.
-    Requires ZERO lookup table queries, running completely immune to API rate limits.
+    Optimized Snapshot Layout Profile: Uses decoupled flat column data strings.
     """
     try:
         with st.spinner("Loading secure build profile..."):
@@ -93,7 +105,7 @@ def render_client_portal(target_build_id):
         st.error("❌ Incorrect passkey. Please double-check your records.")
         st.stop()
 
-    # Read Snapshot Data directly from the row object
+    # Read Snapshot Weights compiled on the Admin compilation interface
     f_weight_snapshot = int(row.get("f_weight", 0))
     r_weight_snapshot = int(row.get("r_weight", 0))
     
@@ -146,7 +158,8 @@ def render_client_portal(target_build_id):
         if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
             st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
-        st.link_button("⭐️ Leave a Google Review", "https://g.page/r/CVj8dcB7IKHrEAE/review", use_container_width=True)
+        # Dynamically pulls review destination from the global variable constant configuration block
+        st.link_button("⭐️ Leave a Google Review", GOOGLE_REVIEW_URL, use_container_width=True)
 
     st.caption("🔒 Secured Archival Record. Property of Wheelbuilder Lab.")
     st.stop()
@@ -161,7 +174,8 @@ if "build" in st.query_params:
 # --- 6. ADMIN DASHBOARD ROUTE ---
 # =========================================================================
 
-@st.cache_data(ttl=3600, show_spinner="Fetching Workshop Data...")
+# The data fetch engine now maps its Spinner allocation directly to your global configurations
+@st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
     tables = {
         "builds": "customer", 
@@ -209,8 +223,8 @@ def update_local_record(table_name, record_id, updates):
         st.session_state.data[table_name] = df
 
 
-st.title("🚲 Wheelbuilder Lab v18.25")
-st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
+st.title("🚲 Wheelbuilder Lab v18.30")
+st.caption(WORKSHOP_CAPTION)
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
 with tabs[0]:
@@ -272,7 +286,6 @@ with tabs[0]:
                         is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
 
                         if new_s == "Complete":
-                            # --- UPGRADED: ENFORCE DATA SNAPSHOT MAPPING ON COMPLETION ---
                             f_wt_snap = int(f_res["total"]) if f_res["exists"] else 0
                             r_wt_snap = int(r_res["total"]) if r_res["exists"] else 0
                             
@@ -283,7 +296,6 @@ with tabs[0]:
                                 "r_weight": r_wt_snap
                             }
                             
-                            # Only compile unique credentials if they have never been generated
                             if not is_valid_wp:
                                 alphabet = string.ascii_uppercase + string.digits
                                 wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
@@ -404,10 +416,9 @@ with tabs[0]:
                                 )
                                 st.code(client_msg, language="text")
                         with c_arch2:
-                            # --- SAFE RE-OPEN FIX: Status resets to Building without destroying customer links ---
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
                                 base.table("builds").update(row['id'], {"status": "Building"})
-                                refresh_api(); st.success("Build re-opened cleanly."); st.rerun()
+                                refresh_api(); st.open_build = True; st.rerun()
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
