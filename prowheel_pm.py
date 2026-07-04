@@ -12,7 +12,7 @@ from pyairtable import Api
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
-WORKSHOP_CAPTION = "Workshop Command Center | State-Intercept Autofill Enabled"
+WORKSHOP_CAPTION = "Workshop Command Center | Native Callback Autofill Enabled"
 
 # =========================================================================
 # --- 2. AIRTABLE CONNECTION ENGINE ---
@@ -110,7 +110,36 @@ def fetch_master_bundle():
     return bundle
 
 # =========================================================================
-# --- 4. FUNCTIONAL PAGE MODULES ---
+# --- 4. NATIVE STATE BACKGROUND CALLBACK CONTROLLERS ---
+# =========================================================================
+def sync_front_recipe_autofill():
+    """Triggered instantly when Front Rim or Front Hub drops down modify state."""
+    df_recipes = st.session_state.data.get("spoke_db", pd.DataFrame())
+    fr = st.session_state.get("reg_fr", "None")
+    fh = st.session_state.get("reg_fh", "None")
+    if fr != "None" and fh != "None" and not df_recipes.empty:
+        match = df_recipes[df_recipes['label'] == f"{fr} | {fh}"]
+        if not match.empty:
+            st.session_state.reg_fl = safe_float(match.iloc[0].get('len_l', 0.0))
+            st.session_state.reg_fr_len = safe_float(match.iloc[0].get('len_r', 0.0))
+            return
+    st.session_state.reg_fl, st.session_state.reg_fr_len = 0.0, 0.0
+
+def sync_rear_recipe_autofill():
+    """Triggered instantly when Rear Rim or Rear Hub drops down modify state."""
+    df_recipes = st.session_state.data.get("spoke_db", pd.DataFrame())
+    rr = st.session_state.get("reg_rr", "None")
+    rh = st.session_state.get("reg_rh", "None")
+    if rr != "None" and rh != "None" and not df_recipes.empty:
+        match = df_recipes[df_recipes['label'] == f"{rr} | {rh}"]
+        if not match.empty:
+            st.session_state.reg_rl = safe_float(match.iloc[0].get('len_l', 0.0))
+            st.session_state.reg_rr_len = safe_float(match.iloc[0].get('len_r', 0.0))
+            return
+    st.session_state.reg_rl, st.session_state.reg_rr_len = 0.0, 0.0
+
+# =========================================================================
+# --- 5. FUNCTIONAL PAGE MODULES ---
 # =========================================================================
 
 def render_client_portal():
@@ -363,7 +392,7 @@ def render_admin_pipeline():
             st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
 
     # =========================================================================
-    # --- TAB 3: STATE-INTERCEPT INTERACTIVE REGISTRY PANEL ---
+    # --- TAB 3: STABLE CALLBACK ENTRY REGISTRY (NO RESET HOOKS) ---
     # =========================================================================
     with tabs[2]:
         st.header("📝 Register New Build")
@@ -374,76 +403,35 @@ def render_admin_pipeline():
         hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
-        df_recipes = st.session_state.data["spoke_db"]
 
-        # --- A. INITIALIZE EXPLICIT BACKGROUND WIDGET STATE SLOTS ---
+        # --- A. INITIALIZE STABLE BACKGROUND STATE REGISTRIES ---
         if "reg_cust" not in st.session_state: st.session_state.reg_cust = ""
         if "reg_inv" not in st.session_state: st.session_state.reg_inv = ""
         if "reg_gal" not in st.session_state: st.session_state.reg_gal = ""
-        if "reg_fr" not in st.session_state: st.session_state.reg_fr = "None"
-        if "reg_fh" not in st.session_state: st.session_state.reg_fh = "None"
-        if "reg_rr" not in st.session_state: st.session_state.reg_rr = "None"
-        if "reg_rh" not in st.session_state: st.session_state.reg_rh = "None"
         if "reg_fl" not in st.session_state: st.session_state.reg_fl = 0.0
         if "reg_fr_len" not in st.session_state: st.session_state.reg_fr_len = 0.0
         if "reg_rl" not in st.session_state: st.session_state.reg_rl = 0.0
         if "reg_rr_len" not in st.session_state: st.session_state.reg_rr_len = 0.0
         if "reg_notes" not in st.session_state: st.session_state.reg_notes = ""
-        
-        # Change-tracking memory monitors prevent rendering loops
-        if "last_f_combo" not in st.session_state: st.session_state.last_f_combo = "None | None"
-        if "last_r_combo" not in st.session_state: st.session_state.last_r_combo = "None | None"
 
-        # --- B. THE STATE INTERCEPTOR ENGINE ---
-        current_f_combo = f"{st.session_state.reg_fr} | {st.session_state.reg_fh}"
-        current_r_combo = f"{st.session_state.reg_rr} | {st.session_state.reg_rh}"
-        trigger_state_redraw = False
-
-        if current_f_combo != st.session_state.last_f_combo:
-            if st.session_state.reg_fr != "None" and st.session_state.reg_fh != "None":
-                f_match = df_recipes[df_recipes['label'] == current_f_combo] if not df_recipes.empty else pd.DataFrame()
-                if not f_match.empty:
-                    st.session_state.reg_fl = safe_float(f_match.iloc[0].get('len_l', 0.0))
-                    st.session_state.reg_fr_len = safe_float(f_match.iloc[0].get('len_r', 0.0))
-                else:
-                    st.session_state.reg_fl, st.session_state.reg_fr_len = 0.0, 0.0
-            else:
-                st.session_state.reg_fl, st.session_state.reg_fr_len = 0.0, 0.0
-            st.session_state.last_f_combo = current_f_combo
-            trigger_state_redraw = True
-
-        if current_r_combo != st.session_state.last_r_combo:
-            if st.session_state.reg_rr != "None" and st.session_state.reg_rh != "None":
-                r_match = df_recipes[df_recipes['label'] == current_r_combo] if not df_recipes.empty else pd.DataFrame()
-                if not r_match.empty:
-                    st.session_state.reg_rl = safe_float(r_match.iloc[0].get('len_l', 0.0))
-                    st.session_state.reg_rr_len = safe_float(r_match.iloc[0].get('len_r', 0.0))
-                else:
-                    st.session_state.reg_rl, st.session_state.reg_rr_len = 0.0, 0.0
-            else:
-                st.session_state.reg_rl, st.session_state.reg_rr_len = 0.0, 0.0
-            st.session_state.last_r_combo = current_r_combo
-            trigger_state_redraw = True
-
-        if trigger_state_redraw:
-            st.rerun()
-
-        # --- C. LIVE INTERACTIVE FORM VIEW ---
+        # Global Non-Form Metadata Inputs
         st.text_input("Customer Name", key="reg_cust")
         st.text_input("Invoice URL", key="reg_inv")
         st.text_input("OneDrive Gallery URL (Optional)", key="reg_gal")
 
-        c_inp1, c_inputs2 = st.columns(2)
-        with c_inp1:
-            st.markdown("#### 🔘 Front Wheel Configuration")
-            st.selectbox("Front Rim Model", rim_opts, key="reg_fr")
-            st.selectbox("Front Hub Model", hub_opts, key="reg_fh")
+        c_f, c_r = st.columns(2)
+        with c_f:
+            st.markdown("#### 🔘 Front Wheel System")
+            # Dropping these down updates only the session state keys in memory natively!
+            st.selectbox("Front Rim Model", rim_opts, key="reg_fr", on_change=sync_front_recipe_autofill)
+            st.selectbox("Front Hub Model", hub_opts, key="reg_fh", on_change=sync_front_recipe_autofill)
             st.number_input("Left Spoke Length (mm)", step=0.1, key="reg_fl")
             st.number_input("Right Spoke Length (mm)", step=0.1, key="reg_fr_len")
-        with c_inputs2:
-            st.markdown("#### 🔘 Rear Wheel Configuration")
-            st.selectbox("Rear Rim Model", rim_opts, key="reg_rr")
-            st.selectbox("Rear Hub Model", hub_opts, key="reg_rh")
+            
+        with c_r:
+            st.markdown("#### 🔘 Rear Wheel System")
+            st.selectbox("Rear Rim Model", rim_opts, key="reg_rr", on_change=sync_rear_recipe_autofill)
+            st.selectbox("Rear Hub Model", hub_opts, key="reg_rh", on_change=sync_rear_recipe_autofill)
             st.number_input("Left Spoke Length (mm) ", step=0.1, key="reg_rl")
             st.number_input("Right Spoke Length (mm) ", step=0.1, key="reg_rr_len")
 
@@ -492,7 +480,7 @@ def render_admin_pipeline():
                             if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
                             else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
                 
-                # Dynamic reset loop purges state memory logs safely
+                # Dynamic clean slate flush reset routing routine
                 st.session_state.reg_cust = ""
                 st.session_state.reg_inv = ""
                 st.session_state.reg_gal = ""
@@ -505,8 +493,6 @@ def render_admin_pipeline():
                 st.session_state.reg_rl = 0.0
                 st.session_state.reg_rr_len = 0.0
                 st.session_state.reg_notes = ""
-                st.session_state.last_f_combo = "None | None"
-                st.session_state.last_r_combo = "None | None"
                 
                 refresh_api(); st.success("Registered successfully!"); st.rerun()
             else:
@@ -532,7 +518,7 @@ def render_admin_pipeline():
         if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
 
 # =========================================================================
-# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
+# --- 6. MODERN SYSTEM ROUTING DISPATCHER ---
 # =========================================================================
 st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
 
