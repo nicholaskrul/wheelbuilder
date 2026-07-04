@@ -12,7 +12,7 @@ from pyairtable import Api
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
-WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
+WORKSHOP_CAPTION = "Workshop Command Center | Production Callback Autofill Enabled"
 
 # =========================================================================
 # --- 2. AIRTABLE CONNECTION ENGINE ---
@@ -36,7 +36,6 @@ def safe_float(val, default=0.0):
     try:
         return float(val)
     except (ValueError, TypeError):
-        # Fallback if a user types strings like "450g" into a numeric column
         clean_str = ''.join(c for c in str(val) if c.isdigit() or c == '.')
         try:
             return float(clean_str) if clean_str else default
@@ -111,7 +110,36 @@ def fetch_master_bundle():
     return bundle
 
 # =========================================================================
-# --- 4. FUNCTIONAL PAGE MODULES ---
+# --- 4. CALLBACK RECIPE AUTOFILL CONTROLLER ---
+# =========================================================================
+def execute_recipe_autofill_sync():
+    """Background Callback: Inspects historical recipes without interface lockups."""
+    df_recipes = st.session_state.data.get("spoke_db", pd.DataFrame())
+    if df_recipes.empty:
+        return
+        
+    # Front Wheel Autofill Lookup
+    f_rim = st.session_state.get("reg_fr", "None")
+    f_hub = st.session_state.get("reg_fh", "None")
+    if f_rim != "None" and f_hub != "None":
+        f_combo = f"{f_rim} | {f_hub}"
+        f_match = df_recipes[df_recipes['label'] == f_combo]
+        if not f_match.empty:
+            st.session_state.reg_fl = safe_float(f_match.iloc[0].get('len_l', 0.0))
+            st.session_state.reg_fr_len = safe_float(f_match.iloc[0].get('len_r', 0.0))
+            
+    # Rear Wheel Autofill Lookup
+    r_rim = st.session_state.get("reg_rr", "None")
+    r_hub = st.session_state.get("reg_rh", "None")
+    if r_rim != "None" and r_hub != "None":
+        r_combo = f"{r_rim} | {r_hub}"
+        r_match = df_recipes[df_recipes['label'] == r_combo]
+        if not r_match.empty:
+            st.session_state.reg_rl = safe_float(r_match.iloc[0].get('len_l', 0.0))
+            st.session_state.reg_rr_len = safe_float(r_match.iloc[0].get('len_r', 0.0))
+
+# =========================================================================
+# --- 5. FUNCTIONAL PAGE MODULES ---
 # =========================================================================
 
 def render_client_portal():
@@ -360,55 +388,113 @@ def render_admin_pipeline():
             if r_search: df_rec_tab = df_rec_tab[df_rec_tab['label'].str.contains(r_search, case=False, na=False)]
             st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
 
+    # =========================================================================
+    # --- TAB 3: SECURE BACK-END AUTOFILL REGISTRY INTERFACE ---
+    # =========================================================================
     with tabs[2]:
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
+        
         rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
         hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v18_10"):
-            cust = st.text_input("Customer Name")
-            inv = st.text_input("Invoice URL")
-            gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
-            c_f, c_r = st.columns(2)
-            with c_f:
-                st.subheader("Front Wheel")
-                fr_rim = st.selectbox("Rim", rim_opts, key="reg_fr")
-                fr_hub = st.selectbox("Hub", hub_opts, key="reg_fh")
-                fl_len, fr_len = st.number_input("Left (mm)", step=0.1), st.number_input("Right (mm)", step=0.1)
-            with c_r:
-                st.subheader("Rear Wheel")
-                rr_rim = st.selectbox("Rim ", rim_opts, key="reg_rr")
-                rr_hub = st.selectbox("Hub ", hub_opts, key="reg_rh")
-                rl_len, rr_len = st.number_input("Left (mm) ", step=0.1), st.number_input("Right (mm) ", step=0.1)
-            spk = st.selectbox("Spoke Model", spoke_opts)
-            nip = st.selectbox("Nipple Model", nipple_opts)
-            notes = st.text_area("Build Notes")
+        # --- Initialize Stable Non-Destructive Memory Slots ---
+        if "reg_cust" not in st.session_state: st.session_state.reg_cust = ""
+        if "reg_inv" not in st.session_state: st.session_state.reg_inv = ""
+        if "reg_gal" not in st.session_state: st.session_state.reg_gal = ""
+        if "reg_fl" not in st.session_state: st.session_state.reg_fl = 0.0
+        if "reg_fr_len" not in st.session_state: st.session_state.reg_fr_len = 0.0
+        if "reg_rl" not in st.session_state: st.session_state.reg_rl = 0.0
+        if "reg_rr_len" not in st.session_state: st.session_state.reg_rr_len = 0.0
+        if "reg_notes" not in st.session_state: st.session_state.reg_notes = ""
+
+        # Primary Core Inputs linked to Session States (Keeps focus locked when typing)
+        st.text_input("Customer Name", key="reg_cust")
+        st.text_input("Invoice URL", key="reg_inv")
+        st.text_input("OneDrive Gallery URL (Optional)", key="reg_gal")
+        
+        c_f, c_r = st.columns(2)
+        
+        with c_f:
+            st.subheader("Front Wheel System")
+            # Selecting a dropdown runs the `execute_recipe_autofill_sync` callback BEFORE rendering inputs
+            st.selectbox("Front Rim Model", rim_opts, key="reg_fr", on_change=execute_recipe_autofill_sync)
+            st.selectbox("Front Hub Model", hub_opts, key="reg_fh", on_change=execute_recipe_autofill_sync)
+            st.number_input("Left Spoke Length (mm)", step=0.1, key="reg_fl")
+            st.number_input("Right Spoke Length (mm)", step=0.1, key="reg_fr_len")
             
-            if st.form_submit_button("🚀 Finalize & Register Build"):
-                if cust:
-                    payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
-                    base.table("builds").create(payload)
-                    db_table = base.table("spoke_db")
-                    df_rims = st.session_state.data["rims"]
-                    df_hubs = st.session_state.data["hubs"]
-                    for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
-                        if r != "None" and h != "None" and l > 0:
-                            # --- UPGRADED: DEFENSIVE CHECK PATTERNS PREVENT INDEXERRORS ---
-                            matched_rim = df_rims[df_rims['label'] == r]
-                            matched_hub = df_hubs[df_hubs['label'] == h]
-                            
-                            if not matched_rim.empty and not matched_hub.empty:
-                                rd_id = matched_rim['id'].values[0]
-                                hd_id = matched_hub['id'].values[0]
-                                fp = f"{r} | {h}".replace("'", "\\'")
-                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                    refresh_api(); st.success("Registered!"); st.rerun()
+        with c_r:
+            st.subheader("Rear Wheel System")
+            st.selectbox("Rear Rim Model ", rim_opts, key="reg_rr", on_change=execute_recipe_autofill_sync)
+            st.selectbox("Rear Hub Model ", hub_opts, key="reg_rh", on_change=execute_recipe_autofill_sync)
+            st.number_input("Left Spoke Length (mm) ", step=0.1, key="reg_rl")
+            st.number_input("Right Spoke Length (mm) ", step=0.1, key="reg_rr_len")
+            
+        st.selectbox("Spoke Model Selection", spoke_opts, key="reg_spk")
+        st.selectbox("Nipple Model Selection", nipple_opts, key="reg_nip")
+        st.text_area("Workshop Build Notes", key="reg_notes")
+        
+        if st.button("🚀 Finalize & Register Build to Pipeline", use_container_width=True):
+            if st.session_state.reg_cust:
+                payload = {
+                    "customer": st.session_state.reg_cust, 
+                    "date": datetime.now().strftime("%Y-%m-%d"), 
+                    "status": "Order Received", 
+                    "invoice_url": st.session_state.reg_inv, 
+                    "gallery_url": st.session_state.reg_gal, 
+                    "f_rim": st.session_state.reg_fr, 
+                    "f_hub": st.session_state.reg_fh, 
+                    "f_l": st.session_state.reg_fl, 
+                    "f_r": st.session_state.reg_fr_len, 
+                    "r_rim": st.session_state.reg_rr, 
+                    "r_hub": st.session_state.reg_rh, 
+                    "r_l": st.session_state.reg_rl, 
+                    "r_r": st.session_state.reg_rr_len, 
+                    "spoke": st.session_state.get("reg_spk", "None"), 
+                    "nipple": st.session_state.get("reg_nip", "None"), 
+                    "notes": st.session_state.reg_notes
+                }
+                base.table("builds").create(payload)
+                db_table = base.table("spoke_db")
+                df_rims = st.session_state.data["rims"]
+                df_hubs = st.session_state.data["hubs"]
+                
+                for r, h, l, rr_l in [
+                    (st.session_state.reg_fr, st.session_state.reg_fh, st.session_state.reg_fl, st.session_state.reg_fr_len), 
+                    (st.session_state.reg_rr, st.session_state.reg_rh, st.session_state.reg_rl, st.session_state.reg_rr_len)
+                ]:
+                    if r != "None" and h != "None" and l > 0:
+                        matched_rim = df_rims[df_rims['label'] == r]
+                        matched_hub = df_hubs[df_hubs['label'] == h]
+                        
+                        if not matched_rim.empty and not matched_hub.empty:
+                            rd_id = matched_rim['id'].values[0]
+                            hd_id = matched_hub['id'].values[0]
+                            fp = f"{r} | {h}".replace("'", "\\'")
+                            exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
+                            if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr_l})
+                            else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr_l, "build_count": 1})
+                
+                # Clean slate reset routine for next build entry
+                st.session_state.reg_cust = ""
+                st.session_state.reg_inv = ""
+                st.session_state.reg_gal = ""
+                st.session_state.reg_fr = "None"
+                st.session_state.reg_fh = "None"
+                st.session_state.reg_fl = 0.0
+                st.session_state.reg_fr_len = 0.0
+                st.session_state.reg_rr = "None"
+                st.session_state.reg_rh = "None"
+                st.session_state.reg_rl = 0.0
+                st.session_state.reg_rr_len = 0.0
+                st.session_state.reg_notes = ""
+                
+                refresh_api(); st.success("Registered successfully!"); st.rerun()
+            else:
+                st.error("Please fill in the Customer Name before finalizing the entry.")
 
     with tabs[3]:
         st.header("📦 Library Management")
@@ -430,7 +516,7 @@ def render_admin_pipeline():
         if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
 
 # =========================================================================
-# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
+# --- 6. MODERN SYSTEM ROUTING DISPATCHER ---
 # =========================================================================
 st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
 
