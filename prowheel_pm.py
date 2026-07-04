@@ -227,7 +227,7 @@ def render_admin_pipeline():
             for key, val in updates.items(): df.loc[df['id'] == record_id, key] = val
             st.session_state.data[table_name] = df
 
-    st.title("🚲 Wheelbuilder Lab Command Center")
+    st.title("🚲 Wheelbuilder Lab 18.70")
     st.caption(WORKSHOP_CAPTION)
     tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
