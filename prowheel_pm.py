@@ -325,4 +325,175 @@ def render_admin_pipeline():
                                     except: return "0.0"
                                 txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n====================================\nCUSTOMER  : {row.get('customer')}\nDATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\nSPOKE     : {row.get('spoke', 'None')}\nNIPPLE    : {row.get('nipple', 'None')}\n====================================\n"
                                 if f_res["exists"]: txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
-                                if r_res["exists"]: txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  -
+                                if r_res["exists"]: txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
+                                txt += f"===================================="
+                                st.code(txt, language="text")
+                                st.download_button(label="📥 Download Parts Sheet", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
+
+                    wp_url_val = row.get('wp_page_url')
+                    if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
+                        st.markdown("---")
+                        st.markdown("### 📱 Client Handover Kit")
+                        client_msg = f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! I've created a secure digital build sheet profile for your records.\n\n🔗 Link: {row.get('wp_page_url')}\n🔑 Password: {row.get('wp_page_password')}\n\nThis page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
+                        st.code(client_msg, language="text")
+
+            st.divider()
+            with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
+                if not completed_builds.empty:
+                    for _, row in completed_builds.iterrows():
+                        with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
+                            c_arch1, c_arch2 = st.columns([3, 1])
+                            with c_arch1:
+                                wp_url_val = row.get('wp_page_url')
+                                if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
+                                    st.markdown("**📱 Client Handover Kit**")
+                                    client_msg = f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! I've created a secure digital build sheet profile for your records.\n\n🔗 Link: {row.get('wp_page_url')}\n🔑 Password: {row.get('wp_page_password')}\n\nThis page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
+                                    st.code(client_msg, language="text")
+                            with c_arch2:
+                                if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
+                                    base.table("builds").update(row['id'], {"status": "Building"})
+                                    refresh_api(); st.rerun()
+
+    with tabs[1]:
+        st.header("📜 Proven Recipe Archive")
+        df_rec_tab = st.session_state.data["spoke_db"]
+        if not df_rec_tab.empty:
+            r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
+            if r_search: df_rec_tab = df_rec_tab[df_rec_tab['label'].str.contains(r_search, case=False, na=False)]
+            st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
+
+    # =========================================================================
+    # --- TAB 3: HYBRID FORM REGISTRY WITH STABLE AUTOFILL INJECTION ---
+    # =========================================================================
+    with tabs[2]:
+        st.header("📝 Register New Build")
+        st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
+        st.divider()
+        
+        rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
+        hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
+        spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
+        nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
+        df_recipes = st.session_state.data["spoke_db"]
+
+        # Real-time Dropdowns outside the form wrapper stay highly responsive
+        st.markdown("### 🔍 Step 1: Select Rims & Hubs")
+        c_sel1, c_sel2 = st.columns(2)
+        with c_sel1:
+            fr_rim = st.selectbox("Front Rim Model", rim_opts, key="reg_fr")
+            fr_hub = st.selectbox("Front Hub Model", hub_opts, key="reg_fh")
+        with c_sel2:
+            rr_rim = st.selectbox("Rear Rim Model", rim_opts, key="reg_rr")
+            rr_hub = st.selectbox("Rear Hub Model", hub_opts, key="reg_rh")
+
+        default_fl, default_fr = 0.0, 0.0
+        if fr_rim != "None" and fr_hub != "None":
+            f_combo = f"{fr_rim} | {fr_hub}"
+            f_match = df_recipes[df_recipes['label'] == f_combo] if not df_recipes.empty else pd.DataFrame()
+            if not f_match.empty:
+                default_fl = safe_float(f_match.iloc[0].get('len_l', 0.0))
+                default_fr = safe_float(f_match.iloc[0].get('len_r', 0.0))
+                st.success(f"💡 Found Proven Front Recipe: Left {default_fl}mm / Right {default_fr}mm")
+
+        default_rl, default_rr = 0.0, 0.0
+        if rr_rim != "None" and rr_hub != "None":
+            r_combo = f"{rr_rim} | {rr_hub}"
+            r_match = df_recipes[df_recipes['label'] == r_combo] if not df_recipes.empty else pd.DataFrame()
+            if not r_match.empty:
+                default_rl = safe_float(r_match.iloc[0].get('len_l', 0.0))
+                default_rr = safe_float(r_match.iloc[0].get('len_r', 0.0))
+                st.success(f"💡 Found Proven Rear Recipe: Left {default_rl}mm / Right {default_rr}mm")
+
+        st.markdown("### 📝 Step 2: Complete Build Metadata")
+        
+        with st.form(f"build_registration_form_{fr_rim}_{fr_hub}_{rr_rim}_{rr_hub}"):
+            cust = st.text_input("Customer Name")
+            inv = st.text_input("Invoice URL")
+            gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
+
+            c_inp1, c_inputs2 = st.columns(2)
+            with c_inp1:
+                st.markdown("**Front Spoke Allocation**")
+                fl_len = st.number_input("Left Spoke Length (mm)", value=default_fl, step=0.1)
+                fr_len = st.number_input("Right Spoke Length (mm)", value=default_fr, step=0.1)
+            with c_inputs2:
+                st.markdown("**Rear Spoke Allocation**")
+                rl_len = st.number_input("Left Spoke Length (mm) ", value=default_rl, step=0.1)
+                rr_len = st.number_input("Right Spoke Length (mm) ", value=default_rr, step=0.1)
+
+            spk = st.selectbox("Spoke Model Selection", spoke_opts)
+            nip = st.selectbox("Nipple Model Selection", nipple_opts)
+            notes = st.text_area("Workshop Build Notes")
+            
+            if st.form_submit_button("🚀 Finalize & Register Build to Pipeline"):
+                if cust:
+                    # FIXED: Formatted payload explicitly across multiple clean rows to ensure it never clips
+                    payload = {
+                        "customer": cust,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "status": "Order Received",
+                        "invoice_url": inv,
+                        "gallery_url": gal_reg,
+                        "f_rim": fr_rim,
+                        "f_hub": fr_hub,
+                        "f_l": fl_len,
+                        "f_r": fr_len,
+                        "r_rim": rr_rim,
+                        "r_hub": rr_hub,
+                        "r_l": rl_len,
+                        "r_r": rr_len,
+                        "spoke": spk,
+                        "nipple": nip,
+                        "notes": notes
+                    }
+                    base.table("builds").create(payload)
+                    db_table = base.table("spoke_db")
+                    df_rims = st.session_state.data["rims"]
+                    df_hubs = st.session_state.data["hubs"]
+                    
+                    for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
+                        if r != "None" and h != "None" and l > 0:
+                            matched_rim = df_rims[df_rims['label'] == r]
+                            matched_hub = df_hubs[df_hubs['label'] == h]
+                            
+                            if not matched_rim.empty and not matched_hub.empty:
+                                rd_id = matched_rim['id'].values[0]
+                                hd_id = matched_hub['id'].values[0]
+                                fp = f"{r} | {h}".replace("'", "\\'")
+                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
+                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
+                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                    refresh_api(); st.success("Registered successfully!"); st.rerun()
+                else:
+                    st.error("Please fill in the Customer Name before finalizing the entry.")
+
+    with tabs[3]:
+        st.header("📦 Library Management")
+        with st.expander("➕ Add New Component"):
+            cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
+            with st.form("quick_add_v18_10"):
+                name = st.text_input("Name")
+                c1, c2 = st.columns(2)
+                p = {}
+                if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD"), "holes": c2.number_input("Holes", value=28), "weight": st.number_input("Weight")}
+                elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
+                else: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
+                if st.form_submit_button("Save to Database"):
+                    if name: 
+                        base.table(f"{cat.lower()}s").create(p)
+                        refresh_api(); st.success("Added!"); st.rerun()
+        v_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
+        df_lib = st.session_state.data[v_cat]
+        if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
+
+# =========================================================================
+# --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
+# =========================================================================
+st.markdown("<style>[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
+
+if "build" in st.query_params:
+    active_page = st.Page(render_client_portal, title="Client Portal", icon="🚲")
+else:
+    active_page = st.Page(render_admin_pipeline, title="Admin Dashboard", icon="⚙️")
+
+st.navigation([active_page], position="hidden").run()
