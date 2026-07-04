@@ -17,7 +17,7 @@ WORKSHOP_CAPTION = "Workshop Command Center | Native Secure Customer Portals Ena
 # =========================================================================
 # --- 2. APP INITIALIZATION & AIRTABLE CORE ENGINE ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab v18.40", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab v18.50", layout="wide", page_icon="🚲")
 
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
@@ -63,10 +63,7 @@ def calculate_wheel_weights(row, bundle):
 
 # --- 4. CLIENT PORTAL RENDER ENGINE (SNAPSHOT & AUTH TRACKED) ---
 def render_client_portal(target_build_id):
-    """
-    Upgraded Portal Engine: Implements native Streamlit session locks.
-    Prevents authentication expiration errors on mobile browsers.
-    """
+    """Optimized Snapshot Layout Profile: Uses decoupled flat column data strings."""
     try:
         with st.spinner("Loading secure build profile..."):
             record = base.table("builds").get(target_build_id)
@@ -76,17 +73,14 @@ def render_client_portal(target_build_id):
         st.error("❌ Invalid or expired build link reference.")
         st.stop()
 
-    # Layout branding header
     st.markdown("<h1 style='text-align: center; margin-top:20px;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #666;'>Secure Client Verification Portal</p>", unsafe_allow_html=True)
     st.divider()
 
-    # --- IMPLEMENT RE-RUN PERSISTENT SESSION TRACKING ---
     auth_session_key = f"auth_{target_build_id}"
     if auth_session_key not in st.session_state:
         st.session_state[auth_session_key] = False
 
-    # Check if the user needs to log in
     if not st.session_state[auth_session_key]:
         correct_password = row.get("wp_page_password")
         if isinstance(correct_password, float) or not correct_password or str(correct_password).lower() in ["none", "nan"]:
@@ -105,11 +99,9 @@ def render_client_portal(target_build_id):
             st.error("❌ Incorrect passkey. Please double-check your records.")
             st.stop()
             
-        # Authentication success: lock the session open and redraw layout safely
         st.session_state[auth_session_key] = True
         st.rerun()
 
-    # Read Snapshot Weights compiled on the Admin compilation interface
     f_weight_snapshot = int(row.get("f_weight", 0))
     r_weight_snapshot = int(row.get("r_weight", 0))
     
@@ -145,7 +137,6 @@ def render_client_portal(target_build_id):
     st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{f_weight_snapshot + r_weight_snapshot}g")
     st.divider()
 
-    # Logistics, Feedback & OneDrive Gallery CTAs
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns([1, 1, 1, 1])
     inv_url = str(row.get('invoice_url', '')).strip()
     track_url = str(row.get('tracking_link', '')).strip()
@@ -173,7 +164,37 @@ if "build" in st.query_params:
 
 
 # =========================================================================
-# --- 6. ADMIN DASHBOARD ROUTE ---
+# --- 6. NEW FEATURE: SECURE MASTER WORKSHOP ADMIN GATE ---
+# =========================================================================
+if "admin_authenticated" not in st.session_state:
+    st.session_state.admin_authenticated = False
+
+if not st.session_state.admin_authenticated:
+    st.markdown("<h2 style='margin-top:40px;'>🔓 Wheelbuilder Lab</h2>", unsafe_allow_html=True)
+    st.caption("Authorized Workshop Personnel Authentication Required")
+    st.divider()
+    
+    c_login, _ = st.columns([2, 3])
+    with c_login:
+        user_entered_password = st.text_input("Enter Master Workshop Password:", type="password")
+        if st.button("Unlock Dashboard Panel", use_container_width=True):
+            try:
+                master_key = st.secrets["admin"]["password"]
+            except Exception:
+                st.error("❌ Configuration Error: 'admin' block password payload missing from secrets file.")
+                st.stop()
+                
+            if user_entered_password == master_key:
+                st.session_state.admin_authenticated = True
+                st.toast("Access Granted. Welcome back!")
+                st.rerun()
+            else:
+                st.error("❌ Invalid master credential key profile mapped.")
+    st.stop()  # Hard execution block: forces absolute termination for unauthenticated inputs
+
+
+# =========================================================================
+# --- 7. ADMIN DASHBOARD ROUTE (Only runs if authenticated above) ---
 # =========================================================================
 
 @st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Fetching Workshop Data...")
@@ -224,7 +245,7 @@ def update_local_record(table_name, record_id, updates):
         st.session_state.data[table_name] = df
 
 
-st.title("🚲 Wheelbuilder Lab v18.40")
+st.title("🚲 Wheelbuilder Lab v18.50")
 st.caption(WORKSHOP_CAPTION)
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
