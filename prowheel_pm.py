@@ -6,8 +6,11 @@ import string
 from datetime import datetime
 from pyairtable import Api
 
-# --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Wheelbuilder Lab v18.21", layout="wide", page_icon="🚲")
+# --- 1. GLOBAL SYSTEM CONFIGURATIONS ---
+st.set_page_config(page_title="Wheelbuilder Lab v18.25", layout="wide", page_icon="🚲")
+
+# Update this to your live production domain when running live on Streamlit Cloud
+LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 
 # --- 2. AIRTABLE CONNECTION ---
 try:
@@ -52,9 +55,12 @@ def calculate_wheel_weights(row, bundle):
         
     return f_res, r_res
 
-# --- 4. CLIENT PORTAL RENDER ENGINE ---
+# --- 4. CLIENT PORTAL RENDER ENGINE (SNAPSHOT DRIVEN) ---
 def render_client_portal(target_build_id):
-    """Surgically isolates and displays a single client build sheet with password protection"""
+    """
+    Optimized Version: Uses flat snapshot weight fields directly from the row.
+    Requires ZERO lookup table queries, running completely immune to API rate limits.
+    """
     try:
         with st.spinner("Loading secure build profile..."):
             record = base.table("builds").get(target_build_id)
@@ -87,17 +93,12 @@ def render_client_portal(target_build_id):
         st.error("❌ Incorrect passkey. Please double-check your records.")
         st.stop()
 
-    # Load lookup tables for portal processing
-    all_rims = pd.DataFrame([r['fields'] for r in base.table("rims").all()])
-    all_hubs = pd.DataFrame([h['fields'] for h in base.table("hubs").all()])
-    all_spokes = pd.DataFrame([s['fields'] for s in base.table("spokes").all()])
-    all_nipples = pd.DataFrame([n['fields'] for n in base.table("nipples").all()])
+    # Read Snapshot Data directly from the row object
+    f_weight_snapshot = int(row.get("f_weight", 0))
+    r_weight_snapshot = int(row.get("r_weight", 0))
     
-    for df, col in [(all_rims, 'rim'), (all_hubs, 'hub'), (all_spokes, 'spoke'), (all_nipples, 'nipple')]:
-        if not df.empty and col in df.columns: df['label'] = df[col].astype(str).str.strip()
-
-    client_bundle = {"rims": all_rims, "hubs": all_hubs, "spokes": all_spokes, "nipples": all_nipples}
-    f_res, r_res = calculate_wheel_weights(row, client_bundle)
+    f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None" and f_weight_snapshot > 0
+    r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None" and r_weight_snapshot > 0
 
     st.balloons()
     st.markdown(f"## Your Custom Wheelset Build Sheet")
@@ -108,25 +109,25 @@ def render_client_portal(target_build_id):
 
     c_front, c_rear = st.columns(2)
     with c_front:
-        if f_res["exists"]:
+        if f_exists:
             st.markdown("### 🔘 Front Wheel Configuration")
             st.markdown(f"- **Rim:** {row.get('f_rim')}")
             st.markdown(f"- **Hub:** {row.get('f_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            st.metric("Verified Front Weight", f"{int(f_res['total'])}g")
+            st.metric("Verified Front Weight", f"{f_weight_snapshot}g")
             
     with c_rear:
-        if r_res["exists"]:
+        if r_exists:
             st.markdown("### 🔘 Rear Wheel Configuration")
             st.markdown(f"- **Rim:** {row.get('r_rim')}")
             st.markdown(f"- **Hub:** {row.get('r_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            st.metric("Verified Rear Weight", f"{int(r_res['total'])}g")
+            st.metric("Verified Rear Weight", f"{r_weight_snapshot}g")
 
     st.divider()
-    st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{int(f_res['total'] + r_res['total'])}g")
+    st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{f_weight_snapshot + r_weight_snapshot}g")
     st.divider()
 
     # Logistics, Feedback & OneDrive Gallery CTAs
@@ -208,7 +209,7 @@ def update_local_record(table_name, record_id, updates):
         st.session_state.data[table_name] = df
 
 
-st.title("🚲 Wheelbuilder Lab v18.21")
+st.title("🚲 Wheelbuilder Lab v18.25")
 st.caption("Workshop Command Center | Native Secure Customer Portals Enabled")
 tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
@@ -270,23 +271,28 @@ with tabs[0]:
                         wp_url_val = row.get('wp_page_url')
                         is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
 
-                        if new_s == "Complete" and not is_valid_wp:
-                            alphabet = string.ascii_uppercase + string.digits
-                            wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                        if new_s == "Complete":
+                            # --- UPGRADED: ENFORCE DATA SNAPSHOT MAPPING ON COMPLETION ---
+                            f_wt_snap = int(f_res["total"]) if f_res["exists"] else 0
+                            r_wt_snap = int(r_res["total"]) if r_res["exists"] else 0
                             
-                            base_url = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
-                            wp_link = f"{base_url}/?build={row['id']}"
-                            
-                            # AUTOMATION FIX: Inject the exact current timestamp into 'date' field to capture completion
                             updates = {
-                                "status": new_s, 
-                                "wp_page_url": wp_link, 
-                                "wp_page_password": wp_pass,
-                                "date": datetime.now().strftime("%Y-%m-%d")
+                                "status": new_s,
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "f_weight": f_wt_snap,
+                                "r_weight": r_wt_snap
                             }
+                            
+                            # Only compile unique credentials if they have never been generated
+                            if not is_valid_wp:
+                                alphabet = string.ascii_uppercase + string.digits
+                                wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                                wp_link = f"{LIVE_DOMAIN}/?build={row['id']}"
+                                updates.update({"wp_page_url": wp_link, "wp_page_password": wp_pass})
+                                
                             base.table("builds").update(row['id'], updates)
                             update_local_record("builds", row['id'], updates)
-                            st.toast("🎉 Client Web Secure Portal Created inside Streamlit!"); st.rerun()
+                            st.toast("🎉 Client Web Secure Portal Synchronized!"); st.rerun()
                         else:
                             base.table("builds").update(row['id'], {"status": new_s})
                             update_local_record("builds", row['id'], {"status": new_s})
@@ -398,9 +404,10 @@ with tabs[0]:
                                 )
                                 st.code(client_msg, language="text")
                         with c_arch2:
+                            # --- SAFE RE-OPEN FIX: Status resets to Building without destroying customer links ---
                             if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
-                                base.table("builds").update(row['id'], {"status": "Building", "wp_page_url": "", "wp_page_password": ""})
-                                refresh_api(); st.rerun()
+                                base.table("builds").update(row['id'], {"status": "Building"})
+                                refresh_api(); st.success("Build re-opened cleanly."); st.rerun()
 
 # --- TAB 2: PROVEN RECIPES ---
 with tabs[1]:
