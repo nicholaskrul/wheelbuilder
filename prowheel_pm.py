@@ -15,10 +15,8 @@ CACHE_DATA_TTL = 3600
 WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
 
 # =========================================================================
-# --- 2. APP INITIALIZATION & AIRTABLE CONNECTION ENGINE ---
+# --- 2. AIRTABLE CONNECTION ENGINE ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab v18.99", layout="wide", page_icon="🚲")
-
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
     BASE_ID = st.secrets["airtable"]["base_id"]
@@ -32,12 +30,13 @@ except Exception:
 # --- 3. CORE ANALYTICS & DEFENSIVE PROGRAMMING HELPERS ---
 # =========================================================================
 def safe_float(val, default=0.0):
-    """Defensive Engine: Prevents application crashes from bad entries."""
+    """Defensive Engine: Prevents application crashes from bad alphanumeric data entries."""
     if val is None:
         return default
     try:
         return float(val)
     except (ValueError, TypeError):
+        # Fallback if a user types strings like "450g" into a numeric column
         clean_str = ''.join(c for c in str(val) if c.isdigit() or c == '.')
         try:
             return float(clean_str) if clean_str else default
@@ -361,119 +360,55 @@ def render_admin_pipeline():
             if r_search: df_rec_tab = df_rec_tab[df_rec_tab['label'].str.contains(r_search, case=False, na=False)]
             st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
 
-    # =========================================================================
-    # --- TAB 3: PURE FORMLESS INTERACTIVE REGISTRY PANEL (ZERO RESET RISKS) ---
-    # =========================================================================
     with tabs[2]:
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
-        
         rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
         hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
-        df_recipes = st.session_state.data["spoke_db"]
 
-        # 1. Core metadata variables are bound to persistent backend memory keys (WILL NEVER RESET)
-        cust = st.text_input("Customer Name", key="stable_cust")
-        inv = st.text_input("Invoice URL", key="stable_inv")
-        gal_reg = st.text_input("OneDrive Gallery URL (Optional)", key="stable_gal")
-
-        c_f, c_r = st.columns(2)
-        with c_f:
-            st.markdown("#### 🔘 Front Wheel Configuration")
-            fr_rim = st.selectbox("Front Rim Model", rim_opts, key="stable_fr")
-            fr_hub = st.selectbox("Front Hub Model", hub_opts, key="stable_fh")
+        with st.form("reg_form_v18_10"):
+            cust = st.text_input("Customer Name")
+            inv = st.text_input("Invoice URL")
+            gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
+            c_f, c_r = st.columns(2)
+            with c_f:
+                st.subheader("Front Wheel")
+                fr_rim = st.selectbox("Rim", rim_opts, key="reg_fr")
+                fr_hub = st.selectbox("Hub", hub_opts, key="reg_fh")
+                fl_len, fr_len = st.number_input("Left (mm)", step=0.1), st.number_input("Right (mm)", step=0.1)
+            with c_r:
+                st.subheader("Rear Wheel")
+                rr_rim = st.selectbox("Rim ", rim_opts, key="reg_rr")
+                rr_hub = st.selectbox("Hub ", hub_opts, key="reg_rh")
+                rl_len, rr_len = st.number_input("Left (mm) ", step=0.1), st.number_input("Right (mm) ", step=0.1)
+            spk = st.selectbox("Spoke Model", spoke_opts)
+            nip = st.selectbox("Nipple Model", nipple_opts)
+            notes = st.text_area("Build Notes")
             
-            # Instant memory lookups parse local bundle calculations effortlessly
-            default_fl, default_fr = 0.0, 0.0
-            if fr_rim != "None" and fr_hub != "None":
-                f_combo = f"{fr_rim} | {fr_hub}"
-                f_match = df_recipes[df_recipes['label'] == f_combo] if not df_recipes.empty else pd.DataFrame()
-                if not f_match.empty:
-                    default_fl = safe_float(f_match.iloc[0].get('len_l', 0.0))
-                    default_fr = safe_float(f_match.iloc[0].get('len_r', 0.0))
-                    st.success(f"✨ Front Match: L: {default_fl}mm / R: {default_fr}mm")
-            
-            # Dynamic widget keys force a precise frontend redraw loop matching default recipes
-            fl_len = st.number_input("Left Spoke Length (mm)", value=default_fl, step=0.1, key=f"dyn_fl_{fr_rim}_{fr_hub}")
-            fr_len = st.number_input("Right Spoke Length (mm)", value=default_fr, step=0.1, key=f"dyn_fr_{fr_rim}_{fr_hub}")
-            
-        with c_r:
-            st.markdown("#### 🔘 Rear Wheel Configuration")
-            rr_rim = st.selectbox("Rear Rim Model", rim_opts, key="stable_rr")
-            rr_hub = st.selectbox("Rear Hub Model", hub_opts, key="stable_rh")
-            
-            default_rl, default_rr = 0.0, 0.0
-            if rr_rim != "None" and rr_hub != "None":
-                r_combo = f"{rr_rim} | {rr_hub}"
-                r_match = df_recipes[df_recipes['label'] == r_combo] if not df_recipes.empty else pd.DataFrame()
-                if not r_match.empty:
-                    default_rl = safe_float(r_match.iloc[0].get('len_l', 0.0))
-                    default_rr = safe_float(r_match.iloc[0].get('len_r', 0.0))
-                    st.success(f"✨ Rear Match: L: {default_rl}mm / R: {default_rr}mm")
-                    
-            rl_len = st.number_input("Left Spoke Length (mm) ", value=default_rl, step=0.1, key=f"dyn_rl_{rr_rim}_{rr_hub}")
-            rr_len = st.number_input("Right Spoke Length (mm) ", value=default_rr, step=0.1, key=f"dyn_rr_{rr_rim}_{rr_hub}")
-
-        spk = st.selectbox("Spoke Model Selection", spoke_opts, key="stable_spk")
-        nip = st.selectbox("Nipple Model Selection", nipple_opts, key="stable_nip")
-        notes = st.text_area("Workshop Build Notes", key="stable_notes")
-        
-        if st.button("🚀 Finalize & Register Build to Pipeline", use_container_width=True):
-            if cust:
-                payload = {
-                    "customer": cust,
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "status": "Order Received",
-                    "invoice_url": inv,
-                    "gallery_url": gal_reg,
-                    "f_rim": fr_rim,
-                    "f_hub": fr_hub,
-                    "f_l": fl_len,
-                    "f_r": fr_len,
-                    "r_rim": rr_rim,
-                    "r_hub": rr_hub,
-                    "r_l": rl_len,
-                    "r_r": rr_len,
-                    "spoke": spk,
-                    "nipple": nip,
-                    "notes": notes
-                }
-                base.table("builds").create(payload)
-                db_table = base.table("spoke_db")
-                df_rims = st.session_state.data["rims"]
-                df_hubs = st.session_state.data["hubs"]
-                
-                for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
-                    if r != "None" and h != "None" and l > 0:
-                        matched_rim = df_rims[df_rims['label'] == r]
-                        matched_hub = df_hubs[df_hubs['label'] == h]
-                        
-                        if not matched_rim.empty and not matched_hub.empty:
-                            rd_id = matched_rim['id'].values[0]
-                            hd_id = matched_hub['id'].values[0]
-                            fp = f"{r} | {h}".replace("'", "\\'")
-                            exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                            if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                            else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                
-                # Formless submission cleans memory trackers manually on validation success
-                st.session_state.stable_cust = ""
-                st.session_state.stable_inv = ""
-                st.session_state.stable_gal = ""
-                st.session_state.stable_fr = "None"
-                st.session_state.stable_fh = "None"
-                st.session_state.stable_rr = "None"
-                st.session_state.stable_rh = "None"
-                st.session_state.stable_spk = "None"
-                st.session_state.stable_nip = "None"
-                st.session_state.stable_notes = ""
-                
-                refresh_api(); st.success("Registered successfully!"); st.rerun()
-            else:
-                st.error("Please fill in the Customer Name before finalizing the entry.")
+            if st.form_submit_button("🚀 Finalize & Register Build"):
+                if cust:
+                    payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
+                    base.table("builds").create(payload)
+                    db_table = base.table("spoke_db")
+                    df_rims = st.session_state.data["rims"]
+                    df_hubs = st.session_state.data["hubs"]
+                    for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
+                        if r != "None" and h != "None" and l > 0:
+                            # --- UPGRADED: DEFENSIVE CHECK PATTERNS PREVENT INDEXERRORS ---
+                            matched_rim = df_rims[df_rims['label'] == r]
+                            matched_hub = df_hubs[df_hubs['label'] == h]
+                            
+                            if not matched_rim.empty and not matched_hub.empty:
+                                rd_id = matched_rim['id'].values[0]
+                                hd_id = matched_hub['id'].values[0]
+                                fp = f"{r} | {h}".replace("'", "\\'")
+                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
+                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
+                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                    refresh_api(); st.success("Registered!"); st.rerun()
 
     with tabs[3]:
         st.header("📦 Library Management")
