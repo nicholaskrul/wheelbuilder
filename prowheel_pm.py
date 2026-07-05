@@ -9,6 +9,9 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
+# FORCE WIDE MODE LAYOUT (Add this line right here!)
+st.set_page_config(page_title="Wheelbuilder Lab", layout="wide", page_icon="🚲")
+
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
