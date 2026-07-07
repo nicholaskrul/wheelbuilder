@@ -206,8 +206,14 @@ def render_admin_pipeline():
     """Administrative View Module: Houses complete builder console workflows."""
     if "admin_authenticated" not in st.session_state: st.session_state.admin_authenticated = False
 
+    # --- 🔓 INSERT SECRET BYPASS INTERCEPTOR HERE ---
+    # Change "LAB_STAFF_2026" to any secret phrase or number combination you prefer
+    if "staff" in st.query_params and st.query_params["staff"] == "LAB_STAFF_2026":
+        st.session_state.admin_authenticated = True
+
     if not st.session_state.admin_authenticated:
         st.markdown("<h2 style='margin-top:40px;'>🔓 Workshop Administration Panel</h2>", unsafe_allow_html=True)
+        # ... rest of your locked password gate code continues exactly as it is ...
         st.divider()
         c_login, _ = st.columns([2, 3])
         with c_login:
