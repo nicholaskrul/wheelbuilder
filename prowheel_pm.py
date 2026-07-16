@@ -9,8 +9,8 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-# FORCE WIDE MODE LAYOUT (Add this line right here!)
-st.set_page_config(page_title="Wheelbuilder Lab", layout="wide", page_icon="🚲")
+# Activates the full-width browser layout to prevent container stacking bugs
+st.set_page_config(page_title="Wheelbuilder Lab Command Center", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -39,7 +39,6 @@ def safe_float(val, default=0.0):
     try:
         return float(val)
     except (ValueError, TypeError):
-        # Fallback if a user types strings like "450g" into a numeric column
         clean_str = ''.join(c for c in str(val) if c.isdigit() or c == '.')
         try:
             return float(clean_str) if clean_str else default
@@ -206,14 +205,12 @@ def render_admin_pipeline():
     """Administrative View Module: Houses complete builder console workflows."""
     if "admin_authenticated" not in st.session_state: st.session_state.admin_authenticated = False
 
-    # --- 🔓 INSERT SECRET BYPASS INTERCEPTOR HERE ---
-    # Change "LAB_STAFF_2026" to any secret phrase or number combination you prefer
+    # Secret Trusted Device Token Entrance Pattern
     if "staff" in st.query_params and st.query_params["staff"] == "LAB_STAFF_2026":
         st.session_state.admin_authenticated = True
 
     if not st.session_state.admin_authenticated:
         st.markdown("<h2 style='margin-top:40px;'>🔓 Workshop Administration Panel</h2>", unsafe_allow_html=True)
-        # ... rest of your locked password gate code continues exactly as it is ...
         st.divider()
         c_login, _ = st.columns([2, 3])
         with c_login:
@@ -236,8 +233,10 @@ def render_admin_pipeline():
             for key, val in updates.items(): df.loc[df['id'] == record_id, key] = val
             st.session_state.data[table_name] = df
 
-    st.title("🚲 Wheelbuilder Lab 18.70")
+    st.title("🚲 Wheelbuilder Lab Command Center")
     st.caption(WORKSHOP_CAPTION)
+    
+    # Enforce clear horizontal grouping allocations
     tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
     with tabs[0]:
@@ -406,7 +405,6 @@ def render_admin_pipeline():
                     df_hubs = st.session_state.data["hubs"]
                     for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                         if r != "None" and h != "None" and l > 0:
-                            # --- UPGRADED: DEFENSIVE CHECK PATTERNS PREVENT INDEXERRORS ---
                             matched_rim = df_rims[df_rims['label'] == r]
                             matched_hub = df_hubs[df_hubs['label'] == h]
                             
