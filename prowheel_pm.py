@@ -3,13 +3,13 @@ import pandas as pd
 import time
 import secrets
 import string
+import math
 from datetime import datetime
 from pyairtable import Api
 
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-# Activates the full-width browser layout to prevent container stacking bugs
 st.set_page_config(page_title="Wheelbuilder Lab Command Center", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
@@ -33,15 +33,43 @@ except Exception:
 # --- 3. CORE ANALYTICS & DEFENSIVE PROGRAMMING HELPERS ---
 # =========================================================================
 def safe_float(val, default=0.0):
-    """Defensive Engine: Prevents application crashes from bad alphanumeric data entries."""
+    """Defensive Engine: Prevents application crashes from bad alphanumeric entries and NaNs."""
     if val is None:
         return default
+    if isinstance(val, float) and math.isnan(val):
+        return default
+    
+    val_str = str(val).lower().strip()
+    if val_str in ["nan", "none", "null", ""]:
+        return default
+        
     try:
         return float(val)
     except (ValueError, TypeError):
-        clean_str = ''.join(c for c in str(val) if c.isdigit() or c == '.')
+        clean_str = ''.join(c for c in val_str if c.isdigit() or c == '.')
         try:
             return float(clean_str) if clean_str else default
+        except ValueError:
+            return default
+
+def safe_int(val, default=0):
+    """Defensive Engine: Securely parses integers, intercepting NaNs and None values."""
+    if val is None:
+        return default
+    if isinstance(val, float) and math.isnan(val):
+        return default
+        
+    val_str = str(val).lower().strip()
+    if val_str in ["nan", "none", "null", ""]:
+        return default
+        
+    try:
+        # float casting first to safely handle strings like "1500.0"
+        return int(float(val))
+    except (ValueError, TypeError):
+        clean_str = ''.join(c for c in val_str if c.isdigit())
+        try:
+            return int(clean_str) if clean_str else default
         except ValueError:
             return default
 
@@ -154,8 +182,8 @@ def render_client_portal():
         st.session_state[auth_session_key] = True
         st.rerun()
 
-    f_weight_snapshot = int(row.get("f_weight", 0))
-    r_weight_snapshot = int(row.get("r_weight", 0))
+    f_weight_snapshot = safe_int(row.get("f_weight", 0))
+    r_weight_snapshot = safe_int(row.get("r_weight", 0))
     f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None" and f_weight_snapshot > 0
     r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None" and r_weight_snapshot > 0
 
@@ -268,7 +296,7 @@ def render_admin_pipeline():
                             st.markdown(f"**{row.get('f_rim')}**")
                             st.caption(f"{row.get('f_hub')}")
                             st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
-                            st.metric("Weight", f"{int(f_res['total'])}g")
+                            st.metric("Weight", f"{safe_int(f_res['total'])}g")
                         else: st.write("---")
                     with c2:
                         st.markdown("**🔘 REAR**")
@@ -276,10 +304,10 @@ def render_admin_pipeline():
                             st.markdown(f"**{row.get('r_rim')}**")
                             st.caption(f"{row.get('r_hub')}")
                             st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
-                            st.metric("Weight", f"{int(r_res['total'])}g")
+                            st.metric("Weight", f"{safe_int(r_res['total'])}g")
                         else: st.write("---")
                     with c3:
-                        if f_res["exists"] or r_res["exists"]: st.metric("📦 SET", f"{int(f_res['total'] + r_res['total'])}g")
+                        if f_res["exists"] or r_res["exists"]: st.metric("📦 SET", f"{safe_int(f_res['total'] + r_res['total'])}g")
                         cur = row.get('status', 'Order Received')
                         opts = ["Order Received", "Parts Received", "Building", "Complete"]
                         new_s = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
@@ -288,8 +316,8 @@ def render_admin_pipeline():
                             wp_url_val = row.get('wp_page_url')
                             is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
                             if new_s == "Complete":
-                                f_wt_snap = int(f_res["total"]) if f_res["exists"] else 0
-                                r_wt_snap = int(r_res["total"]) if r_res["exists"] else 0
+                                f_wt_snap = safe_int(f_res["total"]) if f_res["exists"] else 0
+                                r_wt_snap = safe_int(r_res["total"]) if r_res["exists"] else 0
                                 updates = {"status": new_s, "date": datetime.now().strftime("%Y-%m-%d"), "f_weight": f_wt_snap, "r_weight": r_wt_snap}
                                 if not is_valid_wp:
                                     alphabet = string.ascii_uppercase + string.digits
@@ -349,16 +377,16 @@ def render_admin_pipeline():
                     for _, row in completed_builds.iterrows():
                         with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
                             
-                            # --- CALCULATE SPEC WEIGHTS & FALLBACKS ---
-                            f_weight_snap = int(safe_float(row.get("f_weight", 0)))
-                            r_weight_snap = int(safe_float(row.get("r_weight", 0)))
+                            # --- CALCULATE SPEC WEIGHTS & FALLBACKS (SECURED WITH safe_int) ---
+                            f_weight_snap = safe_int(row.get("f_weight", 0))
+                            r_weight_snap = safe_int(row.get("r_weight", 0))
                             
-                            # Fallback to dynamics if snapshot data doesn't exist
+                            # Fallback to dynamics if snapshot data doesn't exist or is empty
                             f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
                             if f_weight_snap == 0 and f_res["exists"]:
-                                f_weight_snap = int(f_res["total"])
+                                f_weight_snap = safe_int(f_res["total"])
                             if r_weight_snap == 0 and r_res["exists"]:
-                                r_weight_snap = int(r_res["total"])
+                                r_weight_snap = safe_int(r_res["total"])
                                 
                             # --- RENDER ARCHIVED BUILD SHEET ---
                             c_spec1, c_spec2, c_spec3 = st.columns(3)
