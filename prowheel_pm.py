@@ -348,6 +348,47 @@ def render_admin_pipeline():
                 if not completed_builds.empty:
                     for _, row in completed_builds.iterrows():
                         with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
+                            
+                            # --- CALCULATE SPEC WEIGHTS & FALLBACKS ---
+                            f_weight_snap = int(safe_float(row.get("f_weight", 0)))
+                            r_weight_snap = int(safe_float(row.get("r_weight", 0)))
+                            
+                            # Fallback to dynamics if snapshot data doesn't exist
+                            f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
+                            if f_weight_snap == 0 and f_res["exists"]:
+                                f_weight_snap = int(f_res["total"])
+                            if r_weight_snap == 0 and r_res["exists"]:
+                                r_weight_snap = int(r_res["total"])
+                                
+                            # --- RENDER ARCHIVED BUILD SHEET ---
+                            c_spec1, c_spec2, c_spec3 = st.columns(3)
+                            with c_spec1:
+                                st.markdown("**🔘 FRONT CONFIGURATION**")
+                                if f_res["exists"] or row.get('f_rim') != "None":
+                                    st.markdown(f"- **Rim:** {row.get('f_rim')}")
+                                    st.markdown(f"- **Hub:** {row.get('f_hub')}")
+                                    st.markdown(f"- **Spokes:** `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
+                                    st.metric("Verified Front Weight", f"{f_weight_snap}g")
+                                else:
+                                    st.caption("None Configured")
+                            with c_spec2:
+                                st.markdown("**🔘 REAR CONFIGURATION**")
+                                if r_res["exists"] or row.get('r_rim') != "None":
+                                    st.markdown(f"- **Rim:** {row.get('r_rim')}")
+                                    st.markdown(f"- **Hub:** {row.get('r_hub')}")
+                                    st.markdown(f"- **Spokes:** `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
+                                    st.metric("Verified Rear Weight", f"{r_weight_snap}g")
+                                else:
+                                    st.caption("None Configured")
+                            with c_spec3:
+                                st.markdown("**📦 SYSTEM TOTALS**")
+                                st.markdown(f"- **Spoke Model:** {row.get('spoke')}")
+                                st.markdown(f"- **Nipple Model:** {row.get('nipple')}")
+                                st.metric("System Weight", f"{f_weight_snap + r_weight_snap}g")
+                                
+                            st.divider()
+
+                            # --- ARCHIVE ACCESSORIES & CONTROLS ---
                             c_arch1, c_arch2 = st.columns([3, 1])
                             with c_arch1:
                                 wp_url_val = row.get('wp_page_url')
