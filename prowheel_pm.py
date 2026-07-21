@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v19", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v20", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -83,7 +83,7 @@ def get_comp_data_from_bundle(bundle, table_key, label):
     return match.iloc[0].to_dict() if not match.empty else {}
 
 def calculate_wheel_weights(row, bundle):
-    """Calculates weights dynamically using defensive type-safe parsing engines"""
+    """Calculates weights dynamically using defensive type-safe parsing engines."""
     spk_data = get_comp_data_from_bundle(bundle, "spokes", row.get('spoke'))
     nip_data = get_comp_data_from_bundle(bundle, "nipples", row.get('nipple'))
     
@@ -121,11 +121,11 @@ def format_clean_phone(phone_str):
     if not phone_str: return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("0"):
-        clean = "27" + clean[1:]  # Default South Africa format if leading zero; adjust country code if needed
+        clean = "27" + clean[1:]  # Adjust leading country code fallback if needed
     return clean
 
 def generate_update_message(customer_name, status, portal_url, passkey):
-    """Generates standard update messages for clients."""
+    """Generates standard notification messages for clients."""
     status_emoji = {
         "Order Received": "📋",
         "Parts Received": "📦",
@@ -136,7 +136,7 @@ def generate_update_message(customer_name, status, portal_url, passkey):
     msg = (
         f"Hi {customer_name}! {status_emoji} Quick update from Wheelbuilder Lab:\n"
         f"Your custom build status is now: *{status}*\n\n"
-        f"You can view live updates and details on your build portal here:\n"
+        f"You can view live updates and specifications on your portal here:\n"
         f"🔗 {portal_url}\n"
         f"🔑 Passkey: {passkey}\n\n"
         f"Let us know if you have any questions!"
@@ -367,6 +367,18 @@ def render_admin_pipeline():
                         
                         if new_s != cur:
                             updates = {"status": new_s}
+
+                            # 💡 AUTO-GENERATE PORTAL PASSKEY FOR EXISTING BUILDS IF MISSING
+                            wp_pass = row.get("wp_page_password")
+                            if not wp_pass or str(wp_pass).lower() in ["none", "nan", ""]:
+                                alphabet = string.ascii_uppercase + string.digits
+                                generated_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                                generated_url = f"{LIVE_DOMAIN}/?build={row['id']}"
+                                updates.update({
+                                    "wp_page_password": generated_pass,
+                                    "wp_page_url": generated_url
+                                })
+
                             if new_s == "Complete":
                                 f_wt_snap = safe_int(f_res["total"]) if f_res["exists"] else 0
                                 r_wt_snap = safe_int(r_res["total"]) if r_res["exists"] else 0
@@ -374,8 +386,7 @@ def render_admin_pipeline():
                             
                             base.table("builds").update(row['id'], updates)
                             update_local_record("builds", row['id'], updates)
-                            st.toast(f"Status updated to {new_s}!")
-                            st.session_state[f"show_notify_{row['id']}"] = True
+                            st.toast(f"Status updated to {new_s}! Portal key verified.")
                             st.rerun()
 
                     # --- SEMI-AUTOMATED DISPATCH PANEL ---
@@ -383,24 +394,37 @@ def render_admin_pipeline():
                     email = row.get("email", "")
                     portal_url = row.get("wp_page_url", f"{LIVE_DOMAIN}/?build={row['id']}")
                     passkey = row.get("wp_page_password", "")
-                    
-                    msg_text = generate_update_message(row.get('customer'), row.get('status'), portal_url, passkey)
-                    encoded_msg = urllib.parse.quote(msg_text)
 
                     with st.popover("📲 Send Status Update to Client"):
                         st.markdown("#### Send Notification")
-                        st.code(msg_text, language="text")
                         
-                        c_wa, c_em = st.columns(2)
-                        with c_wa:
-                            clean_p = format_clean_phone(phone)
-                            wa_url = f"https://wa.me/{clean_p}?text={encoded_msg}" if clean_p else f"https://wa.me/?text={encoded_msg}"
-                            st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
-                        with c_em:
-                            subject = urllib.parse.quote(f"Wheelbuilder Lab Update: {row.get('status')}")
-                            body = urllib.parse.quote(msg_text)
-                            mailto_url = f"mailto:{email}?subject={subject}&body={body}"
-                            st.link_button("✉️ Send Email", mailto_url, use_container_width=True)
+                        # Fallback generator if build was created in a legacy version
+                        if not passkey or str(passkey).lower() in ["none", "nan", ""]:
+                            st.warning("⚠️ This build does not have a portal passkey yet.")
+                            if st.button("🔑 Generate Portal Key Now", key=f"gen_key_{row['id']}", use_container_width=True):
+                                alphabet = string.ascii_uppercase + string.digits
+                                gen_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                                gen_url = f"{LIVE_DOMAIN}/?build={row['id']}"
+                                updates = {"wp_page_password": gen_pass, "wp_page_url": gen_url}
+                                base.table("builds").update(row['id'], updates)
+                                update_local_record("builds", row['id'], updates)
+                                st.toast("Portal passkey generated!")
+                                st.rerun()
+                        else:
+                            msg_text = generate_update_message(row.get('customer'), row.get('status'), portal_url, passkey)
+                            encoded_msg = urllib.parse.quote(msg_text)
+                            st.code(msg_text, language="text")
+                            
+                            c_wa, c_em = st.columns(2)
+                            with c_wa:
+                                clean_p = format_clean_phone(phone)
+                                wa_url = f"https://wa.me/{clean_p}?text={encoded_msg}" if clean_p else f"https://wa.me/?text={encoded_msg}"
+                                st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
+                            with c_em:
+                                subject = urllib.parse.quote(f"Wheelbuilder Lab Update: {row.get('status')}")
+                                body = urllib.parse.quote(msg_text)
+                                mailto_url = f"mailto:{email}?subject={subject}&body={body}"
+                                st.link_button("✉️ Send Email", mailto_url, use_container_width=True)
 
                     c_btn1, c_btn2, c_btn3 = st.columns(3)
                     with c_btn1:
@@ -507,7 +531,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v19"):
+        with st.form("reg_form_v20"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -534,7 +558,7 @@ def render_admin_pipeline():
             
             if st.form_submit_button("🚀 Finalize & Register Build"):
                 if cust:
-                    # 1. Generate Portal Password immediately
+                    # 1. Generate Portal Passkey immediately upon creation
                     alphabet = string.ascii_uppercase + string.digits
                     wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
                     
@@ -596,7 +620,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v19"):
+            with st.form("quick_add_v20"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
