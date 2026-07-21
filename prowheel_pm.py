@@ -4,6 +4,7 @@ import time
 import secrets
 import string
 import math
+import urllib.parse
 from datetime import datetime
 from pyairtable import Api
 
@@ -16,6 +17,8 @@ LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secr
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
 WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
+
+STATUS_STAGES = ["Order Received", "Parts Received", "Building", "Complete"]
 
 # =========================================================================
 # --- 2. AIRTABLE CONNECTION ENGINE ---
@@ -38,7 +41,7 @@ def safe_float(val, default=0.0):
         return default
     if isinstance(val, float) and math.isnan(val):
         return default
-    
+        
     val_str = str(val).lower().strip()
     if val_str in ["nan", "none", "null", ""]:
         return default
@@ -64,7 +67,6 @@ def safe_int(val, default=0):
         return default
         
     try:
-        # float casting first to safely handle strings like "1500.0"
         return int(float(val))
     except (ValueError, TypeError):
         clean_str = ''.join(c for c in val_str if c.isdigit())
@@ -114,6 +116,33 @@ def calculate_wheel_weights(row, bundle):
         
     return f_res, r_res
 
+def format_clean_phone(phone_str):
+    """Cleans phone numbers for WhatsApp integration."""
+    if not phone_str: return ""
+    clean = "".join(c for c in str(phone_str) if c.isdigit())
+    if clean.startswith("0"):
+        clean = "27" + clean[1:]  # Default South Africa format if leading zero; adjust country code if needed
+    return clean
+
+def generate_update_message(customer_name, status, portal_url, passkey):
+    """Generates standard update messages for clients."""
+    status_emoji = {
+        "Order Received": "📋",
+        "Parts Received": "📦",
+        "Building": "🛠️",
+        "Complete": "🎉"
+    }.get(status, "🚲")
+
+    msg = (
+        f"Hi {customer_name}! {status_emoji} Quick update from Wheelbuilder Lab:\n"
+        f"Your custom build status is now: *{status}*\n\n"
+        f"You can view live updates and details on your build portal here:\n"
+        f"🔗 {portal_url}\n"
+        f"🔑 Passkey: {passkey}\n\n"
+        f"Let us know if you have any questions!"
+    )
+    return msg
+
 @st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Fetching Workshop Data...")
 def fetch_master_bundle():
     tables = {"builds": "customer", "rims": "rim", "hubs": "hub", "spokes": "spoke", "nipples": "nipple", "spoke_db": "combo_id"}
@@ -145,7 +174,7 @@ def fetch_master_bundle():
 # =========================================================================
 
 def render_client_portal():
-    """Client View Module: Securely loads isolated user spec profiles."""
+    """Client View Module: Securely loads isolated user spec profiles & live progress."""
     target_build_id = st.query_params["build"]
     try:
         record = base.table("builds").get(target_build_id)
@@ -156,7 +185,7 @@ def render_client_portal():
         return
 
     st.markdown("<h1 style='text-align: center; margin-top:20px;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #666;'>Secure Client Verification Portal</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #666;'>Secure Self-Service Build Portal</p>", unsafe_allow_html=True)
     st.divider()
 
     auth_session_key = f"auth_{target_build_id}"
@@ -173,7 +202,7 @@ def render_client_portal():
         with c_pass:
             user_input = st.text_input("🔑 Enter your Build Passkey:", type="password")
         if not user_input:
-            st.info("Please enter your passkey to unlock your custom build metrics.")
+            st.info("Please enter your passkey to unlock your custom build portal.")
             return
         if user_input.strip() != str(correct_password).strip():
             st.error("❌ Incorrect passkey.")
@@ -182,15 +211,34 @@ def render_client_portal():
         st.session_state[auth_session_key] = True
         st.rerun()
 
+    current_status = row.get("status", "Order Received")
+    
+    # --- LIVE PROGRESS STEPPER ---
+    st.markdown("### 📊 Live Build Progress")
+    current_idx = STATUS_STAGES.index(current_status) if current_status in STATUS_STAGES else 0
+    
+    cols = st.columns(len(STATUS_STAGES))
+    for idx, stage in enumerate(STATUS_STAGES):
+        with cols[idx]:
+            if idx < current_idx:
+                st.success(f"✅ {stage}")
+            elif idx == current_idx:
+                st.info(f"⏳ **{stage}**")
+            else:
+                st.caption(f"⚪ {stage}")
+                
+    st.progress((current_idx + 1) / len(STATUS_STAGES))
+    st.divider()
+
     f_weight_snapshot = safe_int(row.get("f_weight", 0))
     r_weight_snapshot = safe_int(row.get("r_weight", 0))
-    f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None" and f_weight_snapshot > 0
-    r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None" and r_weight_snapshot > 0
+    f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None"
+    r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None"
 
-    st.markdown(f"## Your Custom Wheelset Build Sheet")
-    st.markdown(f"**Client Profile:** {row.get('customer')} | **Completion Date:** {row.get('date')}")
-    st.write("Thank you for choosing Wheelbuilder for your custom wheel build!")
-    st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on the workmanship and spokes.")
+    st.markdown(f"## Custom Wheelset Build Sheet")
+    st.markdown(f"**Client Profile:** {row.get('customer')} | **Registered:** {row.get('date')}")
+    st.write("Welcome to your custom wheel build tracker! Component specs and verified weights update here dynamically.")
+    st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on workmanship and spokes.")
 
     c_front, c_rear = st.columns(2)
     with c_front:
@@ -200,7 +248,8 @@ def render_client_portal():
             st.markdown(f"- **Hub:** {row.get('f_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            st.metric("Verified Front Weight", f"{f_weight_snapshot}g")
+            if f_weight_snapshot > 0:
+                st.metric("Verified Front Weight", f"{f_weight_snapshot}g")
     with c_rear:
         if r_exists:
             st.markdown("### 🔘 Rear Wheel Configuration")
@@ -208,10 +257,13 @@ def render_client_portal():
             st.markdown(f"- **Hub:** {row.get('r_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            st.metric("Verified Rear Weight", f"{r_weight_snapshot}g")
+            if r_weight_snapshot > 0:
+                st.metric("Verified Rear Weight", f"{r_weight_snapshot}g")
 
-    st.divider()
-    st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{f_weight_snapshot + r_weight_snapshot}g")
+    if f_weight_snapshot > 0 and r_weight_snapshot > 0:
+        st.divider()
+        st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{f_weight_snapshot + r_weight_snapshot}g")
+    
     st.divider()
 
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns([1, 1, 1, 1])
@@ -264,9 +316,11 @@ def render_admin_pipeline():
     st.title("🚲 Wheelbuilder Lab Command Center")
     st.caption(WORKSHOP_CAPTION)
     
-    # Enforce clear horizontal grouping allocations
     tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
+    # -------------------------------------------------------------------------
+    # TAB 0: WORKSHOP PIPELINE
+    # -------------------------------------------------------------------------
     with tabs[0]:
         c_head, c_sync = st.columns([5, 1])
         with c_head: st.subheader("🏁 Workshop Pipeline")
@@ -296,7 +350,7 @@ def render_admin_pipeline():
                             st.markdown(f"**{row.get('f_rim')}**")
                             st.caption(f"{row.get('f_hub')}")
                             st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
-                            st.metric("Weight", f"{safe_int(f_res['total'])}g")
+                            st.metric("Est Weight", f"{safe_int(f_res['total'])}g")
                         else: st.write("---")
                     with c2:
                         st.markdown("**🔘 REAR**")
@@ -304,91 +358,96 @@ def render_admin_pipeline():
                             st.markdown(f"**{row.get('r_rim')}**")
                             st.caption(f"{row.get('r_hub')}")
                             st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
-                            st.metric("Weight", f"{safe_int(r_res['total'])}g")
+                            st.metric("Est Weight", f"{safe_int(r_res['total'])}g")
                         else: st.write("---")
                     with c3:
-                        if f_res["exists"] or r_res["exists"]: st.metric("📦 SET", f"{safe_int(f_res['total'] + r_res['total'])}g")
+                        if f_res["exists"] or r_res["exists"]: st.metric("📦 EST SET", f"{safe_int(f_res['total'] + r_res['total'])}g")
                         cur = row.get('status', 'Order Received')
-                        opts = ["Order Received", "Parts Received", "Building", "Complete"]
-                        new_s = st.selectbox("Status", opts, index=opts.index(cur) if cur in opts else 0, key=f"s_{row['id']}")
+                        new_s = st.selectbox("Status", STATUS_STAGES, index=STATUS_STAGES.index(cur) if cur in STATUS_STAGES else 0, key=f"s_{row['id']}")
                         
                         if new_s != cur:
-                            wp_url_val = row.get('wp_page_url')
-                            is_valid_wp = isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]
+                            updates = {"status": new_s}
                             if new_s == "Complete":
                                 f_wt_snap = safe_int(f_res["total"]) if f_res["exists"] else 0
                                 r_wt_snap = safe_int(r_res["total"]) if r_res["exists"] else 0
-                                updates = {"status": new_s, "date": datetime.now().strftime("%Y-%m-%d"), "f_weight": f_wt_snap, "r_weight": r_wt_snap}
-                                if not is_valid_wp:
-                                    alphabet = string.ascii_uppercase + string.digits
-                                    wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
-                                    wp_link = f"{LIVE_DOMAIN}/?build={row['id']}"
-                                    updates.update({"wp_page_url": wp_link, "wp_page_password": wp_pass})
+                                updates.update({"date": datetime.now().strftime("%Y-%m-%d"), "f_weight": f_wt_snap, "r_weight": r_wt_snap})
+                            
+                            base.table("builds").update(row['id'], updates)
+                            update_local_record("builds", row['id'], updates)
+                            st.toast(f"Status updated to {new_s}!")
+                            st.session_state[f"show_notify_{row['id']}"] = True
+                            st.rerun()
+
+                    # --- SEMI-AUTOMATED DISPATCH PANEL ---
+                    phone = row.get("phone", "")
+                    email = row.get("email", "")
+                    portal_url = row.get("wp_page_url", f"{LIVE_DOMAIN}/?build={row['id']}")
+                    passkey = row.get("wp_page_password", "")
+                    
+                    msg_text = generate_update_message(row.get('customer'), row.get('status'), portal_url, passkey)
+                    encoded_msg = urllib.parse.quote(msg_text)
+
+                    with st.popover("📲 Send Status Update to Client"):
+                        st.markdown("#### Send Notification")
+                        st.code(msg_text, language="text")
+                        
+                        c_wa, c_em = st.columns(2)
+                        with c_wa:
+                            clean_p = format_clean_phone(phone)
+                            wa_url = f"https://wa.me/{clean_p}?text={encoded_msg}" if clean_p else f"https://wa.me/?text={encoded_msg}"
+                            st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
+                        with c_em:
+                            subject = urllib.parse.quote(f"Wheelbuilder Lab Update: {row.get('status')}")
+                            body = urllib.parse.quote(msg_text)
+                            mailto_url = f"mailto:{email}?subject={subject}&body={body}"
+                            st.link_button("✉️ Send Email", mailto_url, use_container_width=True)
+
+                    c_btn1, c_btn2, c_btn3 = st.columns(3)
+                    with c_btn1:
+                        with st.popover("📝 Details"):
+                            fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
+                            rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
+                            c_phone = st.text_input("Phone", value=row.get('phone', ''), key=f"ph_{row['id']}")
+                            c_email = st.text_input("Email", value=row.get('email', ''), key=f"em_{row['id']}")
+                            gal = st.text_input("OneDrive Gallery URL", value=row.get('gallery_url', ''), key=f"gal_{row['id']}")
+                            nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                            if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
+                                updates = {"f_rim_serial": fs, "r_rim_serial": rs, "phone": c_phone, "email": c_email, "gallery_url": gal, "notes": nt}
                                 base.table("builds").update(row['id'], updates)
                                 update_local_record("builds", row['id'], updates)
-                                st.toast("🎉 Client Profile Synchronized!"); st.rerun()
-                            else:
-                                base.table("builds").update(row['id'], {"status": new_s})
-                                update_local_record("builds", row['id'], {"status": new_s})
-                                st.toast(f"Status changed to {new_s}"); st.rerun()
-                        
-                        c_btn1, c_btn2, c_btn3 = st.columns(3)
-                        with c_btn1:
-                            with st.popover("📝 Details"):
-                                fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
-                                rs = st.text_input("Rear Serial", value=row.get('r_rim_serial', ''), key=f"rs_{row['id']}")
-                                gal = st.text_input("OneDrive Gallery URL", value=row.get('gallery_url', ''), key=f"gal_{row['id']}")
-                                nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
-                                if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
-                                    updates = {"f_rim_serial": fs, "r_rim_serial": rs, "gallery_url": gal, "notes": nt}
-                                    base.table("builds").update(row['id'], updates)
-                                    update_local_record("builds", row['id'], updates)
-                                    st.toast("Record details updated."); st.rerun()
-                        with c_btn2:
-                            with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
-                                new_addr_input = st.text_area("Delivery Address", value=str(addr_val).strip() if has_addr else "", height=120, key=f"addr_{row['id']}")
-                                new_track_input = st.text_input("Courier Tracking Link", value=str(track_val).strip() if has_tracking else "", key=f"track_{row['id']}")
-                                if st.button("Save Delivery Info", key=f"addr_btn_{row['id']}", use_container_width=True):
-                                    base.table("builds").update(row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
-                                    update_local_record("builds", row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
-                                    st.toast("Delivery info saved."); st.rerun()
-                        with c_btn3:
-                            with st.popover("🖨️ Parts Sheet"):
-                                def clean_len(val):
-                                    try: return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
-                                    except: return "0.0"
-                                txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n====================================\nCUSTOMER  : {row.get('customer')}\nDATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\nSPOKE     : {row.get('spoke', 'None')}\nNIPPLE    : {row.get('nipple', 'None')}\n====================================\n"
-                                if f_res["exists"]: txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
-                                if r_res["exists"]: txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
-                                txt += f"===================================="
-                                st.code(txt, language="text")
-                                st.download_button(label="📥 Download Parts Sheet", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
-
-                    wp_url_val = row.get('wp_page_url')
-                    if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
-                        st.markdown("---")
-                        st.markdown("### 📱 Client Handover Kit")
-                        client_msg = f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! I've created a secure digital build sheet profile for your records.\n\n🔗 Link: {row.get('wp_page_url')}\n🔑 Password: {row.get('wp_page_password')}\n\nThis page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
-                        st.code(client_msg, language="text")
+                                st.toast("Record details updated."); st.rerun()
+                    with c_btn2:
+                        with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
+                            new_addr_input = st.text_area("Delivery Address", value=str(addr_val).strip() if has_addr else "", height=120, key=f"addr_{row['id']}")
+                            new_track_input = st.text_input("Courier Tracking Link", value=str(track_val).strip() if has_tracking else "", key=f"track_{row['id']}")
+                            if st.button("Save Delivery Info", key=f"addr_btn_{row['id']}", use_container_width=True):
+                                base.table("builds").update(row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
+                                update_local_record("builds", row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
+                                st.toast("Delivery info saved."); st.rerun()
+                    with c_btn3:
+                        with st.popover("🖨️ Parts Sheet"):
+                            def clean_len(val):
+                                try: return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
+                                except: return "0.0"
+                            txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n====================================\nCUSTOMER  : {row.get('customer')}\nDATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\nSPOKE     : {row.get('spoke', 'None')}\nNIPPLE    : {row.get('nipple', 'None')}\n====================================\n"
+                            if f_res["exists"]: txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
+                            if r_res["exists"]: txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
+                            txt += f"===================================="
+                            st.code(txt, language="text")
+                            st.download_button(label="📥 Download Parts Sheet", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
 
             st.divider()
             with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
                 if not completed_builds.empty:
                     for _, row in completed_builds.iterrows():
                         with st.expander(f"✅ {row.get('customer')} — {row.get('date')} — {row.get('f_rim')} | {row.get('r_rim')}"):
-                            
-                            # --- CALCULATE SPEC WEIGHTS & FALLBACKS (SECURED WITH safe_int) ---
                             f_weight_snap = safe_int(row.get("f_weight", 0))
                             r_weight_snap = safe_int(row.get("r_weight", 0))
                             
-                            # Fallback to dynamics if snapshot data doesn't exist or is empty
                             f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
-                            if f_weight_snap == 0 and f_res["exists"]:
-                                f_weight_snap = safe_int(f_res["total"])
-                            if r_weight_snap == 0 and r_res["exists"]:
-                                r_weight_snap = safe_int(r_res["total"])
+                            if f_weight_snap == 0 and f_res["exists"]: f_weight_snap = safe_int(f_res["total"])
+                            if r_weight_snap == 0 and r_res["exists"]: r_weight_snap = safe_int(r_res["total"])
                                 
-                            # --- RENDER ARCHIVED BUILD SHEET ---
                             c_spec1, c_spec2, c_spec3 = st.columns(3)
                             with c_spec1:
                                 st.markdown("**🔘 FRONT CONFIGURATION**")
@@ -397,8 +456,7 @@ def render_admin_pipeline():
                                     st.markdown(f"- **Hub:** {row.get('f_hub')}")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
                                     st.metric("Verified Front Weight", f"{f_weight_snap}g")
-                                else:
-                                    st.caption("None Configured")
+                                else: st.caption("None Configured")
                             with c_spec2:
                                 st.markdown("**🔘 REAR CONFIGURATION**")
                                 if r_res["exists"] or row.get('r_rim') != "None":
@@ -406,8 +464,7 @@ def render_admin_pipeline():
                                     st.markdown(f"- **Hub:** {row.get('r_hub')}")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
                                     st.metric("Verified Rear Weight", f"{r_weight_snap}g")
-                                else:
-                                    st.caption("None Configured")
+                                else: st.caption("None Configured")
                             with c_spec3:
                                 st.markdown("**📦 SYSTEM TOTALS**")
                                 st.markdown(f"- **Spoke Model:** {row.get('spoke')}")
@@ -415,8 +472,6 @@ def render_admin_pipeline():
                                 st.metric("System Weight", f"{f_weight_snap + r_weight_snap}g")
                                 
                             st.divider()
-
-                            # --- ARCHIVE ACCESSORIES & CONTROLS ---
                             c_arch1, c_arch2 = st.columns([3, 1])
                             with c_arch1:
                                 wp_url_val = row.get('wp_page_url')
@@ -429,6 +484,9 @@ def render_admin_pipeline():
                                     base.table("builds").update(row['id'], {"status": "Building"})
                                     refresh_api(); st.rerun()
 
+    # -------------------------------------------------------------------------
+    # TAB 1: PROVEN RECIPES
+    # -------------------------------------------------------------------------
     with tabs[1]:
         st.header("📜 Proven Recipe Archive")
         df_rec_tab = st.session_state.data["spoke_db"]
@@ -437,6 +495,9 @@ def render_admin_pipeline():
             if r_search: df_rec_tab = df_rec_tab[df_rec_tab['label'].str.contains(r_search, case=False, na=False)]
             st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
 
+    # -------------------------------------------------------------------------
+    # TAB 2: REGISTER NEW BUILD
+    # -------------------------------------------------------------------------
     with tabs[2]:
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
@@ -446,10 +507,16 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v18_10"):
-            cust = st.text_input("Customer Name")
-            inv = st.text_input("Invoice URL")
-            gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
+        with st.form("reg_form_v19"):
+            c_cust1, c_cust2, c_cust3 = st.columns(3)
+            with c_cust1: cust = st.text_input("Customer Name *")
+            with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
+            with c_cust3: email_input = st.text_input("Customer Email")
+
+            c_urls1, c_urls2 = st.columns(2)
+            with c_urls1: inv = st.text_input("Invoice URL")
+            with c_urls2: gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
+
             c_f, c_r = st.columns(2)
             with c_f:
                 st.subheader("Front Wheel")
@@ -467,8 +534,41 @@ def render_admin_pipeline():
             
             if st.form_submit_button("🚀 Finalize & Register Build"):
                 if cust:
-                    payload = {"customer": cust, "date": datetime.now().strftime("%Y-%m-%d"), "status": "Order Received", "invoice_url": inv, "gallery_url": gal_reg, "f_rim": fr_rim, "f_hub": fr_hub, "f_l": fl_len, "f_r": fr_len, "r_rim": rr_rim, "r_hub": rr_hub, "r_l": rl_len, "r_r": rr_len, "spoke": spk, "nipple": nip, "notes": notes}
-                    base.table("builds").create(payload)
+                    # 1. Generate Portal Password immediately
+                    alphabet = string.ascii_uppercase + string.digits
+                    wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                    
+                    payload = {
+                        "customer": cust, 
+                        "phone": phone_input,
+                        "email": email_input,
+                        "date": datetime.now().strftime("%Y-%m-%d"), 
+                        "status": "Order Received", 
+                        "wp_page_password": wp_pass,
+                        "invoice_url": inv, 
+                        "gallery_url": gal_reg, 
+                        "f_rim": fr_rim, 
+                        "f_hub": fr_hub, 
+                        "f_l": fl_len, 
+                        "f_r": fr_len, 
+                        "r_rim": rr_rim, 
+                        "r_hub": rr_hub, 
+                        "r_l": rl_len, 
+                        "r_r": rr_len, 
+                        "spoke": spk, 
+                        "nipple": nip, 
+                        "notes": notes
+                    }
+                    
+                    # 2. Create Airtable Record
+                    new_rec = base.table("builds").create(payload)
+                    rec_id = new_rec["id"]
+                    
+                    # 3. Save generated portal URL back to record
+                    wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
+                    base.table("builds").update(rec_id, {"wp_page_url": wp_link})
+
+                    # 4. Save Recipe Combos
                     db_table = base.table("spoke_db")
                     df_rims = st.session_state.data["rims"]
                     df_hubs = st.session_state.data["hubs"]
@@ -484,13 +584,19 @@ def render_admin_pipeline():
                                 exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
                                 if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
                                 else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                    refresh_api(); st.success("Registered!"); st.rerun()
+                    
+                    refresh_api()
+                    st.success("✅ Build Registered & Client Self-Service Portal Activated!")
+                    st.rerun()
 
+    # -------------------------------------------------------------------------
+    # TAB 3: LIBRARY MANAGEMENT
+    # -------------------------------------------------------------------------
     with tabs[3]:
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v18_10"):
+            with st.form("quick_add_v19"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
