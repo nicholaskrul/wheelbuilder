@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v25", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v26", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -189,6 +189,11 @@ def render_client_portal():
     # --- BLACK BRANDING THEME INJECTION ---
     st.markdown("""
         <style>
+        /* Reduce overall top container padding */
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+        }
         /* Main background */
         .stApp {
             background-color: #000000 !important;
@@ -197,12 +202,6 @@ def render_client_portal():
         /* Universal Text Elements */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
             color: #FFFFFF !important;
-        }
-        /* Secondary Text Subtitles */
-        .portal-subtitle {
-            text-align: center;
-            color: #A0A0A0 !important;
-            margin-top: 5px;
         }
         /* Metrics styling */
         [data-testid="stMetricValue"] {
@@ -220,6 +219,7 @@ def render_client_portal():
         /* Horizontal Rule */
         hr {
             border-color: #222222 !important;
+            margin: 1.5rem 0 !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -233,16 +233,21 @@ def render_client_portal():
         st.error("❌ Invalid or expired build link reference.")
         return
 
-    # --- BRAND LOGO HEADER ---
-    c_logo1, c_logo2, c_logo3 = st.columns([2, 1, 2])
-    with c_logo2:
+    # --- BRAND LOGO & HEADER ROW (LEFT ALIGNED) ---
+    col_logo, col_title = st.columns([1, 4], vertical_alignment="center")
+    with col_logo:
         try:
-            st.image("WB_logo.png", use_container_width=True)
+            st.image("WB_logo.png", width=170)
         except Exception:
-            st.markdown("<h1 style='text-align: center;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
+            st.markdown("<h2 style='margin:0;'>🚲 WHEELBUILDER LAB</h2>", unsafe_allow_html=True)
+    with col_title:
+        st.markdown(
+            "<span style='font-size: 1.45rem; color: #A0A0A0 !important; font-weight: 400; margin-left: 10px;'>"
+            "Secure Self-Service Build Portal</span>", 
+            unsafe_allow_html=True
+        )
 
-    st.markdown("<p class='portal-subtitle'>Secure Self-Service Build Portal</p>", unsafe_allow_html=True)
-    st.divider()
+    st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
 
     auth_session_key = f"auth_{target_build_id}"
     if auth_session_key not in st.session_state:
@@ -628,7 +633,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v25"):
+        with st.form("reg_form_v26"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -716,7 +721,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v25"):
+            with st.form("quick_add_v26"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
