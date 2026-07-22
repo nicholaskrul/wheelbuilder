@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v22", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v23", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -247,14 +247,22 @@ def render_client_portal():
 
     st.divider()
 
-    f_weight_snapshot = safe_int(row.get("f_weight", 0))
-    r_weight_snapshot = safe_int(row.get("r_weight", 0))
-    f_exists = bool(row.get('f_rim')) and row.get('f_rim') != "None"
-    r_exists = bool(row.get('r_rim')) and row.get('r_rim') != "None"
+    # --- DYNAMIC WEIGHT COMPUTATION ENGINE ---
+    bundle = fetch_master_bundle()
+    f_res, r_res = calculate_wheel_weights(row, bundle)
+
+    f_weight_snap = safe_int(row.get("f_weight", 0))
+    r_weight_snap = safe_int(row.get("r_weight", 0))
+
+    f_weight_disp = f_weight_snap if f_weight_snap > 0 else safe_int(f_res["total"])
+    r_weight_disp = r_weight_snap if r_weight_snap > 0 else safe_int(r_res["total"])
+
+    f_exists = f_res["exists"] or (bool(row.get('f_rim')) and row.get('f_rim') != "None")
+    r_exists = r_res["exists"] or (bool(row.get('r_rim')) and row.get('r_rim') != "None")
 
     st.markdown(f"## Custom Wheelset Build Sheet")
     st.markdown(f"**Client Profile:** {row.get('customer')} | **Registered:** {row.get('date')}")
-    st.write("Welcome to your custom wheel build tracker! Component specs and verified weights update here dynamically.")
+    st.write("Welcome to your custom wheel build tracker! Component specs and weights update here dynamically.")
     st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on workmanship and spokes.")
 
     c_front, c_rear = st.columns(2)
@@ -265,8 +273,9 @@ def render_client_portal():
             st.markdown(f"- **Hub:** {row.get('f_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            if f_weight_snapshot > 0:
-                st.metric("Verified Front Weight", f"{f_weight_snapshot}g")
+            if f_weight_disp > 0:
+                f_lbl = "Verified Front Weight" if f_weight_snap > 0 else "Estimated Front Weight"
+                st.metric(f_lbl, f"{f_weight_disp}g")
     with c_rear:
         if r_exists:
             st.markdown("### 🔘 Rear Wheel Configuration")
@@ -274,12 +283,15 @@ def render_client_portal():
             st.markdown(f"- **Hub:** {row.get('r_hub')}")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
-            if r_weight_snapshot > 0:
-                st.metric("Verified Rear Weight", f"{r_weight_snapshot}g")
+            if r_weight_disp > 0:
+                r_lbl = "Verified Rear Weight" if r_weight_snap > 0 else "Estimated Rear Weight"
+                st.metric(r_lbl, f"{r_weight_disp}g")
 
-    if f_weight_snapshot > 0 and r_weight_snapshot > 0:
+    total_system_weight = (f_weight_disp if f_exists else 0) + (r_weight_disp if r_exists else 0)
+    if total_system_weight > 0:
         st.divider()
-        st.metric("📦 COMPLETE SYSTEM WHEELSET WEIGHT", f"{f_weight_snapshot + r_weight_snapshot}g")
+        sys_lbl = "📦 VERIFIED WHEELSET WEIGHT" if (f_weight_snap > 0 or r_weight_snap > 0) else "📦 ESTIMATED WHEELSET WEIGHT"
+        st.metric(sys_lbl, f"{total_system_weight}g")
     
     st.divider()
 
@@ -571,7 +583,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v22"):
+        with st.form("reg_form_v23"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -659,7 +671,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v22"):
+            with st.form("quick_add_v23"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
