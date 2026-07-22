@@ -2,15 +2,28 @@ name: Keep Wheelbuilder App Alive
 
 on:
   schedule:
-    # Runs every 6 hours (at minute 0 of 00:00, 06:00, 12:00, 18:00 UTC)
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # Allows manual triggering directly from the GitHub Actions tab
+    # Runs every 4 hours to keep the app fresh
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
   ping-app:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Keep-Alive Request
+      - name: Ping Streamlit App with Browser Headers
         run: |
-          curl -s -L "https://wheelbuilder.streamlit.app" > /dev/null
-          echo "Successfully sent keep-alive ping to Streamlit App!"
+          USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+          
+          echo "Pinging main application URL..."
+          STATUS_MAIN=$(curl -s -o /dev/null -w "%{http_code}" -L -A "$USER_AGENT" "https://wheelbuilder.streamlit.app")
+          echo "Main App HTTP Status: $STATUS_MAIN"
+          
+          echo "Pinging Streamlit health endpoint..."
+          STATUS_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" -L -A "$USER_AGENT" "https://wheelbuilder.streamlit.app/_stcore/health")
+          echo "Health Check HTTP Status: $STATUS_HEALTH"
+          
+          if [ "$STATUS_MAIN" -eq 200 ] || [ "$STATUS_HEALTH" -eq 200 ]; then
+            echo "✅ Keep-alive ping successful! App is awake."
+          else
+            echo "⚠️ Received HTTP status $STATUS_MAIN / $STATUS_HEALTH. Signal transmitted."
+          fi
