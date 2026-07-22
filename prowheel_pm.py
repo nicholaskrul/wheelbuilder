@@ -11,13 +11,14 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v27", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v28", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
 CACHE_DATA_TTL = 3600  
 WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
 
+STAFF_SECRET_KEY = "LAB_STAFF_2026"
 STATUS_STAGES = ["Order Received", "Parts Received", "Building", "Complete"]
 
 # =========================================================================
@@ -202,34 +203,28 @@ def render_client_portal():
     # --- BLACK BRANDING THEME INJECTION ---
     st.markdown("""
         <style>
-        /* Reduce overall top container padding */
         .block-container {
             padding-top: 1.5rem !important;
             padding-bottom: 2rem !important;
         }
-        /* Main background */
         .stApp {
             background-color: #000000 !important;
             color: #FFFFFF !important;
         }
-        /* Universal Text Elements */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
             color: #FFFFFF !important;
         }
-        /* Metrics styling */
         [data-testid="stMetricValue"] {
             color: #00FFCC !important;
         }
         [data-testid="stMetricLabel"] {
             color: #D0D0D0 !important;
         }
-        /* Form Inputs */
         .stTextInput input {
             background-color: #121212 !important;
             color: #FFFFFF !important;
             border: 1px solid #333333 !important;
         }
-        /* Horizontal Rule */
         hr {
             border-color: #222222 !important;
             margin: 1.5rem 0 !important;
@@ -377,10 +372,11 @@ def render_admin_pipeline():
     """Administrative View Module: Houses complete builder console workflows."""
     if "admin_authenticated" not in st.session_state: st.session_state.admin_authenticated = False
 
-    # Secret Trusted Device Token Entrance Pattern
-    if "staff" in st.query_params and st.query_params["staff"] == "LAB_STAFF_2026":
+    # 1. Check URL query token for persistent device binding
+    if "staff" in st.query_params and st.query_params["staff"] == STAFF_SECRET_KEY:
         st.session_state.admin_authenticated = True
 
+    # 2. Render Login Screen if not authenticated
     if not st.session_state.admin_authenticated:
         st.markdown("<h2 style='margin-top:40px;'>🔓 Workshop Administration Panel</h2>", unsafe_allow_html=True)
         st.divider()
@@ -390,9 +386,12 @@ def render_admin_pipeline():
             if st.button("Unlock Workshop Console", use_container_width=True):
                 if user_entered_password == st.secrets["admin"]["password"]:
                     st.session_state.admin_authenticated = True
-                    st.toast("Access Granted.")
+                    # Bind device persistent token directly to browser URL
+                    st.query_params["staff"] = STAFF_SECRET_KEY
+                    st.toast("Device Bound & Authenticated!")
                     st.rerun()
-                else: st.error("❌ Invalid Password.")
+                else: 
+                    st.error("❌ Invalid Password.")
         return
 
     if 'data' not in st.session_state: st.session_state.data = fetch_master_bundle()
@@ -414,10 +413,16 @@ def render_admin_pipeline():
     # TAB 0: WORKSHOP PIPELINE
     # -------------------------------------------------------------------------
     with tabs[0]:
-        c_head, c_sync = st.columns([5, 1])
+        c_head, c_sync, c_logout = st.columns([4, 1, 1])
         with c_head: st.subheader("🏁 Workshop Pipeline")
         with c_sync:
             if st.button("🔄 Force Sync", use_container_width=True): refresh_api(); st.rerun()
+        with c_logout:
+            if st.button("🔒 Lock Console", use_container_width=True):
+                st.session_state.admin_authenticated = False
+                if "staff" in st.query_params:
+                    del st.query_params["staff"]
+                st.rerun()
 
         df_builds = st.session_state.data["builds"]
         if df_builds.empty: st.info("No active builds found.")
@@ -646,7 +651,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v27"):
+        with st.form("reg_form_v28"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -734,7 +739,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v27"):
+            with st.form("quick_add_v28"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
