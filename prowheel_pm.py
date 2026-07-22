@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v20", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v21", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -75,6 +75,17 @@ def safe_int(val, default=0):
         except ValueError:
             return default
 
+def safe_airtable_update(table_name, record_id, updates):
+    """Safely updates Airtable records without crashing Streamlit on missing schema columns."""
+    try:
+        base.table(table_name).update(record_id, updates)
+        return True, "Updated successfully!"
+    except Exception as e:
+        err_msg = str(e)
+        if "UNKNOWN_FIELD_NAME" in err_msg or "422" in err_msg:
+            return False, "❌ Airtable Error: Please ensure columns 'phone', 'email', 'wp_page_password', and 'wp_page_url' exist in your Airtable 'builds' table!"
+        return False, f"❌ Update Failed: {err_msg}"
+
 def get_comp_data_from_bundle(bundle, table_key, label):
     if not label or label == "None": return {}
     df = bundle.get(table_key, pd.DataFrame())
@@ -121,7 +132,7 @@ def format_clean_phone(phone_str):
     if not phone_str: return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("0"):
-        clean = "27" + clean[1:]  # Adjust leading country code fallback if needed
+        clean = "27" + clean[1:]  # Default South Africa format; adjust leading country code if needed
     return clean
 
 def generate_update_message(customer_name, status, portal_url, passkey):
@@ -384,10 +395,13 @@ def render_admin_pipeline():
                                 r_wt_snap = safe_int(r_res["total"]) if r_res["exists"] else 0
                                 updates.update({"date": datetime.now().strftime("%Y-%m-%d"), "f_weight": f_wt_snap, "r_weight": r_wt_snap})
                             
-                            base.table("builds").update(row['id'], updates)
-                            update_local_record("builds", row['id'], updates)
-                            st.toast(f"Status updated to {new_s}! Portal key verified.")
-                            st.rerun()
+                            success, msg = safe_airtable_update("builds", row['id'], updates)
+                            if success:
+                                update_local_record("builds", row['id'], updates)
+                                st.toast(f"Status updated to {new_s}!")
+                                st.rerun()
+                            else:
+                                st.error(msg)
 
                     # --- SEMI-AUTOMATED DISPATCH PANEL ---
                     phone = row.get("phone", "")
@@ -406,10 +420,14 @@ def render_admin_pipeline():
                                 gen_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
                                 gen_url = f"{LIVE_DOMAIN}/?build={row['id']}"
                                 updates = {"wp_page_password": gen_pass, "wp_page_url": gen_url}
-                                base.table("builds").update(row['id'], updates)
-                                update_local_record("builds", row['id'], updates)
-                                st.toast("Portal passkey generated!")
-                                st.rerun()
+                                
+                                success, msg = safe_airtable_update("builds", row['id'], updates)
+                                if success:
+                                    update_local_record("builds", row['id'], updates)
+                                    st.toast("Portal passkey generated!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
                         else:
                             msg_text = generate_update_message(row.get('customer'), row.get('status'), portal_url, passkey)
                             encoded_msg = urllib.parse.quote(msg_text)
@@ -435,19 +453,36 @@ def render_admin_pipeline():
                             c_email = st.text_input("Email", value=row.get('email', ''), key=f"em_{row['id']}")
                             gal = st.text_input("OneDrive Gallery URL", value=row.get('gallery_url', ''), key=f"gal_{row['id']}")
                             nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
+                            
                             if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
-                                updates = {"f_rim_serial": fs, "r_rim_serial": rs, "phone": c_phone, "email": c_email, "gallery_url": gal, "notes": nt}
-                                base.table("builds").update(row['id'], updates)
-                                update_local_record("builds", row['id'], updates)
-                                st.toast("Record details updated."); st.rerun()
+                                updates = {
+                                    "f_rim_serial": fs, 
+                                    "r_rim_serial": rs, 
+                                    "phone": c_phone, 
+                                    "email": c_email, 
+                                    "gallery_url": gal, 
+                                    "notes": nt
+                                }
+                                success, msg = safe_airtable_update("builds", row['id'], updates)
+                                if success:
+                                    update_local_record("builds", row['id'], updates)
+                                    st.toast("Record details updated.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
                     with c_btn2:
                         with st.popover(f"📮 Delivery{' ✅' if (has_addr or has_tracking) else ''}"):
                             new_addr_input = st.text_area("Delivery Address", value=str(addr_val).strip() if has_addr else "", height=120, key=f"addr_{row['id']}")
                             new_track_input = st.text_input("Courier Tracking Link", value=str(track_val).strip() if has_tracking else "", key=f"track_{row['id']}")
                             if st.button("Save Delivery Info", key=f"addr_btn_{row['id']}", use_container_width=True):
-                                base.table("builds").update(row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
-                                update_local_record("builds", row['id'], {"delivery_address": new_addr_input, "tracking_link": new_track_input})
-                                st.toast("Delivery info saved."); st.rerun()
+                                updates = {"delivery_address": new_addr_input, "tracking_link": new_track_input}
+                                success, msg = safe_airtable_update("builds", row['id'], updates)
+                                if success:
+                                    update_local_record("builds", row['id'], updates)
+                                    st.toast("Delivery info saved.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
                     with c_btn3:
                         with st.popover("🖨️ Parts Sheet"):
                             def clean_len(val):
@@ -505,7 +540,7 @@ def render_admin_pipeline():
                                     st.code(client_msg, language="text")
                             with c_arch2:
                                 if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
-                                    base.table("builds").update(row['id'], {"status": "Building"})
+                                    safe_airtable_update("builds", row['id'], {"status": "Building"})
                                     refresh_api(); st.rerun()
 
     # -------------------------------------------------------------------------
@@ -531,7 +566,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v20"):
+        with st.form("reg_form_v21"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -584,34 +619,37 @@ def render_admin_pipeline():
                         "notes": notes
                     }
                     
-                    # 2. Create Airtable Record
-                    new_rec = base.table("builds").create(payload)
-                    rec_id = new_rec["id"]
-                    
-                    # 3. Save generated portal URL back to record
-                    wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
-                    base.table("builds").update(rec_id, {"wp_page_url": wp_link})
+                    try:
+                        # 2. Create Airtable Record
+                        new_rec = base.table("builds").create(payload)
+                        rec_id = new_rec["id"]
+                        
+                        # 3. Save generated portal URL back to record
+                        wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
+                        safe_airtable_update("builds", rec_id, {"wp_page_url": wp_link})
 
-                    # 4. Save Recipe Combos
-                    db_table = base.table("spoke_db")
-                    df_rims = st.session_state.data["rims"]
-                    df_hubs = st.session_state.data["hubs"]
-                    for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
-                        if r != "None" and h != "None" and l > 0:
-                            matched_rim = df_rims[df_rims['label'] == r]
-                            matched_hub = df_hubs[df_hubs['label'] == h]
-                            
-                            if not matched_rim.empty and not matched_hub.empty:
-                                rd_id = matched_rim['id'].values[0]
-                                hd_id = matched_hub['id'].values[0]
-                                fp = f"{r} | {h}".replace("'", "\\'")
-                                exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                                if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                                else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                    
-                    refresh_api()
-                    st.success("✅ Build Registered & Client Self-Service Portal Activated!")
-                    st.rerun()
+                        # 4. Save Recipe Combos
+                        db_table = base.table("spoke_db")
+                        df_rims = st.session_state.data["rims"]
+                        df_hubs = st.session_state.data["hubs"]
+                        for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
+                            if r != "None" and h != "None" and l > 0:
+                                matched_rim = df_rims[df_rims['label'] == r]
+                                matched_hub = df_hubs[df_hubs['label'] == h]
+                                
+                                if not matched_rim.empty and not matched_hub.empty:
+                                    rd_id = matched_rim['id'].values[0]
+                                    hd_id = matched_hub['id'].values[0]
+                                    fp = f"{r} | {h}".replace("'", "\\'")
+                                    exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
+                                    if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
+                                    else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                        
+                        refresh_api()
+                        st.success("✅ Build Registered & Client Self-Service Portal Activated!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to create build record. Please check that Airtable columns 'phone', 'email', 'wp_page_password', and 'wp_page_url' exist in your base. Error: {e}")
 
     # -------------------------------------------------------------------------
     # TAB 3: LIBRARY MANAGEMENT
@@ -620,7 +658,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v20"):
+            with st.form("quick_add_v21"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
