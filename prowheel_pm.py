@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v23", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v24", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -195,8 +195,15 @@ def render_client_portal():
         st.error("❌ Invalid or expired build link reference.")
         return
 
-    st.markdown("<h1 style='text-align: center; margin-top:20px;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #666;'>Secure Self-Service Build Portal</p>", unsafe_allow_html=True)
+    # --- BRAND LOGO HEADER ---
+    c_logo1, c_logo2, c_logo3 = st.columns([2, 1, 2])
+    with c_logo2:
+        try:
+            st.image("WB_logo.png", use_container_width=True)
+        except Exception:
+            st.markdown("<h1 style='text-align: center;'>🚲 WHEELBUILDER LAB</h1>", unsafe_allow_html=True)
+
+    st.markdown("<p style='text-align: center; color: #666; margin-top: 5px;'>Secure Self-Service Build Portal</p>", unsafe_allow_html=True)
     st.divider()
 
     auth_session_key = f"auth_{target_build_id}"
@@ -583,7 +590,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v23"):
+        with st.form("reg_form_v24"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -671,7 +678,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v23"):
+            with st.form("quick_add_v24"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
