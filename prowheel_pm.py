@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v26", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v27", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -186,6 +186,19 @@ def fetch_master_bundle():
 
 def render_client_portal():
     """Client View Module: Securely loads isolated user spec profiles & live progress."""
+    # --- SILENT WEBSOCKET HEARTBEAT (PREVENTS BROWSER SESSIONS FROM TIMING OUT) ---
+    st.components.v1.html(
+        """
+        <script>
+            setInterval(function() {
+                window.dispatchEvent(new Event('resize'));
+            }, 45000);
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
     # --- BLACK BRANDING THEME INJECTION ---
     st.markdown("""
         <style>
@@ -633,7 +646,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v26"):
+        with st.form("reg_form_v27"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -721,7 +734,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v26"):
+            with st.form("quick_add_v27"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
