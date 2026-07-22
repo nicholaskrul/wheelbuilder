@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v21", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v22", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -239,6 +239,12 @@ def render_client_portal():
                 st.caption(f"⚪ {stage}")
                 
     st.progress((current_idx + 1) / len(STATUS_STAGES))
+
+    # --- WORKSHOP NOTES SECTION ---
+    build_notes = str(row.get('notes', '')).strip()
+    if build_notes and build_notes.lower() not in ["none", "nan", ""]:
+        st.info(f"📢 **Workshop Update Note:** {build_notes}")
+
     st.divider()
 
     f_weight_snapshot = safe_int(row.get("f_weight", 0))
@@ -379,7 +385,7 @@ def render_admin_pipeline():
                         if new_s != cur:
                             updates = {"status": new_s}
 
-                            # 💡 AUTO-GENERATE PORTAL PASSKEY FOR EXISTING BUILDS IF MISSING
+                            # AUTO-GENERATE PORTAL PASSKEY FOR EXISTING BUILDS IF MISSING
                             wp_pass = row.get("wp_page_password")
                             if not wp_pass or str(wp_pass).lower() in ["none", "nan", ""]:
                                 alphabet = string.ascii_uppercase + string.digits
@@ -412,7 +418,6 @@ def render_admin_pipeline():
                     with st.popover("📲 Send Status Update to Client"):
                         st.markdown("#### Send Notification")
                         
-                        # Fallback generator if build was created in a legacy version
                         if not passkey or str(passkey).lower() in ["none", "nan", ""]:
                             st.warning("⚠️ This build does not have a portal passkey yet.")
                             if st.button("🔑 Generate Portal Key Now", key=f"gen_key_{row['id']}", use_container_width=True):
@@ -566,7 +571,7 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v21"):
+        with st.form("reg_form_v22"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
             with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
@@ -593,7 +598,6 @@ def render_admin_pipeline():
             
             if st.form_submit_button("🚀 Finalize & Register Build"):
                 if cust:
-                    # 1. Generate Portal Passkey immediately upon creation
                     alphabet = string.ascii_uppercase + string.digits
                     wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
                     
@@ -620,15 +624,12 @@ def render_admin_pipeline():
                     }
                     
                     try:
-                        # 2. Create Airtable Record
                         new_rec = base.table("builds").create(payload)
                         rec_id = new_rec["id"]
                         
-                        # 3. Save generated portal URL back to record
                         wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
                         safe_airtable_update("builds", rec_id, {"wp_page_url": wp_link})
 
-                        # 4. Save Recipe Combos
                         db_table = base.table("spoke_db")
                         df_rims = st.session_state.data["rims"]
                         df_hubs = st.session_state.data["hubs"]
@@ -658,7 +659,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v21"):
+            with st.form("quick_add_v22"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
