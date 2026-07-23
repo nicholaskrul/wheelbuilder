@@ -11,7 +11,7 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v28", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center v29", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
@@ -129,11 +129,21 @@ def calculate_wheel_weights(row, bundle):
     return f_res, r_res
 
 def format_clean_phone(phone_str):
-    """Cleans phone numbers for WhatsApp integration."""
+    """Cleans phone numbers for WhatsApp integration (e.g., 27821234567)."""
     if not phone_str: return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("0"):
-        clean = "27" + clean[1:]  # Default South Africa format; adjust leading country code if needed
+        clean = "27" + clean[1:]  # Default South Africa format
+    return clean
+
+def format_10digit_phone(phone_str):
+    """Standardises phone numbers to a 10-digit format (e.g. 0821234567) for portal passwords."""
+    if not phone_str: return ""
+    clean = "".join(c for c in str(phone_str) if c.isdigit())
+    if clean.startswith("27") and len(clean) == 11:
+        clean = "0" + clean[2:]
+    elif len(clean) > 10 and clean.startswith("27"):
+        clean = "0" + clean[2:]
     return clean
 
 def generate_update_message(customer_name, status, portal_url, passkey):
@@ -150,7 +160,7 @@ def generate_update_message(customer_name, status, portal_url, passkey):
         f"Your custom build status is now: *{status}*\n\n"
         f"You can view live updates and specifications on your portal here:\n"
         f"🔗 {portal_url}\n"
-        f"🔑 Passkey: {passkey}\n\n"
+        f"🔑 Password: Your 10-digit registered phone number ({passkey})\n\n"
         f"Let us know if you have any questions!"
     )
     return msg
@@ -262,19 +272,27 @@ def render_client_portal():
         st.session_state[auth_session_key] = False
 
     if not st.session_state[auth_session_key]:
-        correct_password = row.get("wp_page_password")
-        if isinstance(correct_password, float) or not correct_password or str(correct_password).lower() in ["none", "nan"]:
-            st.warning("This build sheet has not been assigned an access key yet.")
+        raw_pass = row.get("wp_page_password")
+        raw_phone = row.get("phone", "")
+        
+        # Determine expected password (stored password or formatted phone number)
+        expected_pass = format_10digit_phone(raw_pass) if (raw_pass and str(raw_pass).lower() not in ["none", "nan", ""]) else format_10digit_phone(raw_phone)
+
+        if not expected_pass:
+            st.warning("This build sheet has not been assigned a registered 10-digit phone number yet.")
             return
 
         c_pass, _ = st.columns([2, 3])
         with c_pass:
-            user_input = st.text_input("🔑 Enter your Build Passkey:", type="password")
+            user_input = st.text_input("🔑 Enter your 10-Digit Registered Phone Number:", type="password", placeholder="e.g. 0821234567")
         if not user_input:
-            st.info("Please enter your passkey to unlock your custom build portal.")
+            st.info("Please enter your 10-digit registered phone number to unlock your custom build portal.")
             return
-        if user_input.strip() != str(correct_password).strip():
-            st.error("❌ Incorrect passkey.")
+        
+        # Compare cleaned inputs
+        clean_user_input = format_10digit_phone(user_input)
+        if clean_user_input != expected_pass and user_input.strip() != str(raw_pass).strip():
+            st.error("❌ Incorrect phone number.")
             return
             
         st.session_state[auth_session_key] = True
@@ -465,11 +483,11 @@ def render_admin_pipeline():
                         if new_s != cur:
                             updates = {"status": new_s}
 
-                            # AUTO-GENERATE PORTAL PASSKEY FOR EXISTING BUILDS IF MISSING
+                            # AUTO-GENERATE / ENSURE 10-DIGIT PHONE PASSKEY FOR EXISTING BUILDS IF MISSING
                             wp_pass = row.get("wp_page_password")
                             if not wp_pass or str(wp_pass).lower() in ["none", "nan", ""]:
-                                alphabet = string.ascii_uppercase + string.digits
-                                generated_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                                phone_10 = format_10digit_phone(row.get("phone", ""))
+                                generated_pass = phone_10 if phone_10 else ("WS-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)))
                                 generated_url = f"{LIVE_DOMAIN}/?build={row['id']}"
                                 updates.update({
                                     "wp_page_password": generated_pass,
@@ -493,23 +511,23 @@ def render_admin_pipeline():
                     phone = row.get("phone", "")
                     email = row.get("email", "")
                     portal_url = row.get("wp_page_url", f"{LIVE_DOMAIN}/?build={row['id']}")
-                    passkey = row.get("wp_page_password", "")
+                    passkey = format_10digit_phone(row.get("wp_page_password", "")) or format_10digit_phone(phone)
 
                     with st.popover("📲 Send Status Update to Client"):
                         st.markdown("#### Send Notification")
                         
-                        if not passkey or str(passkey).lower() in ["none", "nan", ""]:
-                            st.warning("⚠️ This build does not have a portal passkey yet.")
-                            if st.button("🔑 Generate Portal Key Now", key=f"gen_key_{row['id']}", use_container_width=True):
-                                alphabet = string.ascii_uppercase + string.digits
-                                gen_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                        if not passkey:
+                            st.warning("⚠️ This build does not have a phone number or portal passkey assigned.")
+                            if st.button("🔑 Set Phone Passkey Now", key=f"gen_key_{row['id']}", use_container_width=True):
+                                phone_10 = format_10digit_phone(phone)
+                                gen_pass = phone_10 if phone_10 else ("WS-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)))
                                 gen_url = f"{LIVE_DOMAIN}/?build={row['id']}"
                                 updates = {"wp_page_password": gen_pass, "wp_page_url": gen_url}
                                 
                                 success, msg = safe_airtable_update("builds", row['id'], updates)
                                 if success:
                                     update_local_record("builds", row['id'], updates)
-                                    st.toast("Portal passkey generated!")
+                                    st.toast("Portal passkey synchronized!")
                                     st.rerun()
                                 else:
                                     st.error(msg)
@@ -540,6 +558,7 @@ def render_admin_pipeline():
                             nt = st.text_area("Notes", value=row.get('notes', ''), key=f"nt_{row['id']}")
                             
                             if st.button("Save Changes", key=f"btn_{row['id']}", use_container_width=True):
+                                phone_10 = format_10digit_phone(c_phone)
                                 updates = {
                                     "f_rim_serial": fs, 
                                     "r_rim_serial": rs, 
@@ -548,10 +567,13 @@ def render_admin_pipeline():
                                     "gallery_url": gal, 
                                     "notes": nt
                                 }
+                                if phone_10:
+                                    updates["wp_page_password"] = phone_10
+
                                 success, msg = safe_airtable_update("builds", row['id'], updates)
                                 if success:
                                     update_local_record("builds", row['id'], updates)
-                                    st.toast("Record details updated.")
+                                    st.toast("Record details & passkey updated.")
                                     st.rerun()
                                 else:
                                     st.error(msg)
@@ -619,9 +641,10 @@ def render_admin_pipeline():
                             c_arch1, c_arch2 = st.columns([3, 1])
                             with c_arch1:
                                 wp_url_val = row.get('wp_page_url')
+                                client_pass = format_10digit_phone(row.get('wp_page_password')) or format_10digit_phone(row.get('phone'))
                                 if isinstance(wp_url_val, str) and bool(wp_url_val.strip()) and wp_url_val.lower() not in ["none", "nan"]:
                                     st.markdown("**📱 Client Handover Kit**")
-                                    client_msg = f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! I've created a secure digital build sheet profile for your records.\n\n🔗 Link: {row.get('wp_page_url')}\n🔑 Password: {row.get('wp_page_password')}\n\nThis page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
+                                    client_msg = f"Hi {row.get('customer')}! 👋 Your custom wheelset build is officially finalized and packed! I've created a secure digital build sheet profile for your records.\n\n🔗 Link: {row.get('wp_page_url')}\n🔑 Password: {client_pass}\n\nThis page includes your verified weights, components breakdown sheet, digital invoice copy, and shipping courier tracking records."
                                     st.code(client_msg, language="text")
                             with c_arch2:
                                 if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
@@ -651,10 +674,10 @@ def render_admin_pipeline():
         spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
         nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
 
-        with st.form("reg_form_v28"):
+        with st.form("reg_form_v29"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
             with c_cust1: cust = st.text_input("Customer Name *")
-            with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp updates)")
+            with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp & Portal Password) *")
             with c_cust3: email_input = st.text_input("Customer Email")
 
             c_urls1, c_urls2 = st.columns(2)
@@ -678,8 +701,8 @@ def render_admin_pipeline():
             
             if st.form_submit_button("🚀 Finalize & Register Build"):
                 if cust:
-                    alphabet = string.ascii_uppercase + string.digits
-                    wp_pass = "WS-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                    phone_10 = format_10digit_phone(phone_input)
+                    wp_pass = phone_10 if phone_10 else ("WS-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)))
                     
                     payload = {
                         "customer": cust, 
@@ -739,7 +762,7 @@ def render_admin_pipeline():
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
-            with st.form("quick_add_v28"):
+            with st.form("quick_add_v29"):
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
