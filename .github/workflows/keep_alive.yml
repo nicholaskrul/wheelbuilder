@@ -2,28 +2,58 @@ name: Keep Wheelbuilder App Alive
 
 on:
   schedule:
-    # Runs every 4 hours to keep the app fresh
-    - cron: '0 */4 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+    # Runs every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
-  ping-app:
+  keep-alive:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Streamlit App with Browser Headers
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright & Chromium
         run: |
-          USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-          
-          echo "Pinging main application URL..."
-          STATUS_MAIN=$(curl -s -o /dev/null -w "%{http_code}" -L -A "$USER_AGENT" "https://wheelbuilder.streamlit.app")
-          echo "Main App HTTP Status: $STATUS_MAIN"
-          
-          echo "Pinging Streamlit health endpoint..."
-          STATUS_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" -L -A "$USER_AGENT" "https://wheelbuilder.streamlit.app/_stcore/health")
-          echo "Health Check HTTP Status: $STATUS_HEALTH"
-          
-          if [ "$STATUS_MAIN" -eq 200 ] || [ "$STATUS_HEALTH" -eq 200 ]; then
-            echo "✅ Keep-alive ping successful! App is awake."
-          else
-            echo "⚠️ Received HTTP status $STATUS_MAIN / $STATUS_HEALTH. Signal transmitted."
-          fi
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run Headless Ping & Wake Engine
+        run: |
+          python -c "
+          import asyncio
+          from playwright.async_api import async_playwright
+
+          async def run():
+              async with async_playwright() as p:
+                  # Launch headless Chrome browser
+                  browser = await p.chromium.launch(headless=True)
+                  context = await browser.new_context(
+                      user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                  )
+                  page = await context.new_page()
+                  print('🌐 Navigating to Wheelbuilder Lab...')
+                  
+                  try:
+                      response = await page.goto('https://wheelbuilder.streamlit.app', timeout=60000)
+                      print(f'HTTP Response Code: {response.status if response else \"No response\"}')
+                      await page.wait_for_timeout(8000)
+                      
+                      # Auto-click Streamlit's wake button if the app is hibernating
+                      wake_btn = page.get_by_role('button', name='Yes, wake it up!')
+                      if await wake_btn.is_visible():
+                          print('⚡ Streamlit app is sleeping. Clicking wake-up button...')
+                          await wake_btn.click()
+                          await page.wait_for_timeout(12000)
+                          print('✅ Wake signal transmitted successfully!')
+                      else:
+                          print('✨ App is active and running.')
+                  except Exception as e:
+                      print(f'⚠️ Session notice: {e}')
+                  finally:
+                      await browser.close()
+
+          asyncio.run(run())
+          "
