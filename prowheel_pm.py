@@ -323,6 +323,8 @@ def compute_workshop_analytics(bundle, completed_only=False):
     top_hubs = pd.Series(all_hubs).value_counts().head(10) if all_hubs else pd.Series(dtype=int)
 
     return {
+        "df_builds_processed": df_builds,
+        "rim_holes_map": rim_holes_map,
         "total_builds": len(df_builds),
         "total_wheels": total_wheels,
         "top_rims": top_rims,
@@ -994,6 +996,8 @@ def render_admin_pipeline():
             df_nip = analytics["df_nip"]
             top_rims = analytics["top_rims"]
             top_hubs = analytics["top_hubs"]
+            df_processed_builds = analytics["df_builds_processed"]
+            rim_holes_map = analytics["rim_holes_map"]
 
             tot_spokes = df_spk['count'].sum() if not df_spk.empty else 0
             tot_nipples = df_nip['count'].sum() if not df_nip.empty else 0
@@ -1098,6 +1102,58 @@ def render_admin_pipeline():
                 with st.expander("🔍 Detailed Monthly Nipple Breakdown by Model"):
                     nip_pivot = df_nip.pivot_table(index="month", columns="model", values="count", aggfunc="sum", fill_value=0)
                     st.dataframe(nip_pivot, use_container_width=True)
+
+            st.divider()
+
+            # 5. Interactive Build-by-Build Audit & Verification Tool
+            with st.expander("🔎 Audit & Verification: Inspect Individual Build Calculations", expanded=True):
+                st.markdown("Select a month to inspect the exact builds and spoke/nipple counts calculated by the system:")
+                
+                available_months = sorted(list(set(df_spk['month'].tolist())), reverse=True) if not df_spk.empty else []
+                if available_months:
+                    selected_month = st.selectbox("Filter Audit by Month:", available_months, index=0)
+                    
+                    audit_rows = []
+                    for _, b_row in df_processed_builds.iterrows():
+                        b_date = str(b_row.get('date', '')).strip()
+                        m_str = b_date[:7] if (b_date and b_date.lower() not in ["none", "nan", ""] and len(b_date) >= 7 and b_date[:4].isdigit()) else "Unspecified Date"
+                        
+                        if m_str == selected_month:
+                            f_rim = str(b_row.get('f_rim', '')).strip()
+                            r_rim = str(b_row.get('r_rim', '')).strip()
+                            
+                            f_cnt = rim_holes_map.get(f_rim.lower(), 28) if (f_rim and f_rim.lower() != "none") else 0
+                            r_cnt = rim_holes_map.get(r_rim.lower(), 28) if (r_rim and r_rim.lower() != "none") else 0
+                            
+                            if f_cnt <= 0 or f_cnt > 48:
+                                f_cnt = 28
+                            if r_cnt <= 0 or r_cnt > 48:
+                                r_cnt = 28
+                                
+                            tot_spk_b = f_cnt + r_cnt
+                            
+                            audit_rows.append({
+                                "Customer": b_row.get('customer', 'Unknown'),
+                                "Date": b_date,
+                                "Status": b_row.get('status', 'Unknown'),
+                                "Front Rim": f_rim if f_rim else "None",
+                                "Rear Rim": r_rim if r_rim else "None",
+                                "Front Spokes": f_cnt,
+                                "Rear Spokes": r_cnt,
+                                "Total Build Spokes": tot_spk_b,
+                                "Spoke Model": b_row.get('spoke', 'Unspecified'),
+                                "Nipple Model": b_row.get('nipple', 'Unspecified')
+                            })
+                            
+                    df_audit = pd.DataFrame(audit_rows)
+                    if not df_audit.empty:
+                        st.markdown(f"#### 📜 Builds Analyzed for **{selected_month}** ({len(df_audit)} builds)")
+                        st.dataframe(df_audit, use_container_width=True, hide_index=True)
+                        st.success(f"🧮 **Verified Total Spokes for {selected_month}:** `{df_audit['Total Build Spokes'].sum():,} spokes` across {len(df_audit)} build sheets.")
+                    else:
+                        st.info(f"No builds found for {selected_month}.")
+                else:
+                    st.caption("No month records available to inspect.")
 
     # -------------------------------------------------------------------------
     # TAB 3: PROVEN RECIPES
