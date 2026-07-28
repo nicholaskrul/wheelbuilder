@@ -233,6 +233,86 @@ def add_local_record(table_name, record_dict):
     else:
         st.session_state.data[table_name] = pd.concat([df, new_df], ignore_index=True)
 
+def compute_workshop_analytics(bundle):
+    """Computes Workshop Trends analytics in-memory without making any Airtable API calls."""
+    df_builds = bundle.get("builds", pd.DataFrame())
+    df_rims = bundle.get("rims", pd.DataFrame())
+    
+    if df_builds.empty:
+        return {}
+
+    rim_holes_map = {}
+    if not df_rims.empty and 'label' in df_rims.columns and 'holes' in df_rims.columns:
+        for _, r_row in df_rims.iterrows():
+            lbl = str(r_row.get('label', '')).strip().lower()
+            if lbl:
+                rim_holes_map[lbl] = int(safe_float(r_row.get('holes', 28)))
+
+    all_rims = []
+    all_hubs = []
+    spoke_records = []
+    nipple_records = []
+    total_wheels = 0
+
+    for _, row in df_builds.iterrows():
+        b_date = str(row.get('date', '')).strip()
+        month_str = b_date[:7] if (len(b_date) >= 7 and b_date[:4].isdigit()) else "Unspecified"
+        
+        f_rim = str(row.get('f_rim', '')).strip()
+        r_rim = str(row.get('r_rim', '')).strip()
+        f_hub = str(row.get('f_hub', '')).strip()
+        r_hub = str(row.get('r_hub', '')).strip()
+        spk_model = str(row.get('spoke', '')).strip()
+        nip_model = str(row.get('nipple', '')).strip()
+        
+        if not spk_model or spk_model.lower() == "none":
+            spk_model = "Unspecified Spoke"
+        if not nip_model or nip_model.lower() == "none":
+            nip_model = "Unspecified Nipple"
+
+        # Front Wheel
+        if f_rim and f_rim.lower() != "none":
+            total_wheels += 1
+            all_rims.append(f_rim)
+            if f_hub and f_hub.lower() != "none":
+                all_hubs.append(f_hub)
+            
+            f_holes = rim_holes_map.get(f_rim.lower(), 28)
+            if f_holes == 0:
+                f_holes = 28
+            
+            spoke_records.append({"model": spk_model, "count": f_holes, "month": month_str})
+            nipple_records.append({"model": nip_model, "count": f_holes, "month": month_str})
+
+        # Rear Wheel
+        if r_rim and r_rim.lower() != "none":
+            total_wheels += 1
+            all_rims.append(r_rim)
+            if r_hub and r_hub.lower() != "none":
+                all_hubs.append(r_hub)
+            
+            r_holes = rim_holes_map.get(r_rim.lower(), 28)
+            if r_holes == 0:
+                r_holes = 28
+            
+            spoke_records.append({"model": spk_model, "count": r_holes, "month": month_str})
+            nipple_records.append({"model": nip_model, "count": r_holes, "month": month_str})
+
+    df_spk = pd.DataFrame(spoke_records)
+    df_nip = pd.DataFrame(nipple_records)
+
+    top_rims = pd.Series(all_rims).value_counts().head(10) if all_rims else pd.Series(dtype=int)
+    top_hubs = pd.Series(all_hubs).value_counts().head(10) if all_hubs else pd.Series(dtype=int)
+
+    return {
+        "total_builds": len(df_builds),
+        "total_wheels": total_wheels,
+        "top_rims": top_rims,
+        "top_hubs": top_hubs,
+        "df_spk": df_spk,
+        "df_nip": df_nip
+    }
+
 # =========================================================================
 # --- 4. FUNCTIONAL PAGE MODULES ---
 # =========================================================================
@@ -458,7 +538,7 @@ def render_admin_pipeline():
     st.title("🚲 Wheelbuilder Lab Command Center")
     st.caption(WORKSHOP_CAPTION)
     
-    tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
+    tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📊 Trends", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
     # -------------------------------------------------------------------------
     # TAB 0: WORKSHOP PIPELINE
@@ -874,9 +954,129 @@ def render_admin_pipeline():
                     st.write("---")
 
     # -------------------------------------------------------------------------
-    # TAB 2: PROVEN RECIPES
+    # TAB 2: WORKSHOP TRENDS & ANALYTICS MODULE
     # -------------------------------------------------------------------------
     with tabs[2]:
+        st.subheader("📊 Workshop Trends & Analytics Dashboard")
+        
+        analytics = compute_workshop_analytics(st.session_state.data)
+        
+        if not analytics or analytics.get("total_builds", 0) == 0:
+            st.info("No build records found for analytics processing.")
+        else:
+            df_spk = analytics["df_spk"]
+            df_nip = analytics["df_nip"]
+            top_rims = analytics["top_rims"]
+            top_hubs = analytics["top_hubs"]
+
+            tot_spokes = df_spk['count'].sum() if not df_spk.empty else 0
+            tot_nipples = df_nip['count'].sum() if not df_nip.empty else 0
+
+            # 1. Top Metrics Summary Row
+            tm1, tm2, tm3, tm4 = st.columns(4)
+            with tm1:
+                st.metric("🏆 Lifetime Builds Registered", analytics["total_builds"])
+            with tm2:
+                st.metric("🚲 Total Wheels Built", analytics["total_wheels"])
+            with tm3:
+                st.metric("📏 Total Spokes Laced", f"{tot_spokes:,}")
+            with tm4:
+                st.metric("🔩 Total Nipples Installed", f"{tot_nipples:,}")
+
+            st.divider()
+
+            # 2. Top 10 Rims & Top 10 Hubs Charts
+            c_rim_col, c_hub_col = st.columns(2)
+            with c_rim_col:
+                st.markdown("### 🔘 Top 10 Rims to Date")
+                if not top_rims.empty:
+                    st.bar_chart(top_rims, color="#00FFCC")
+                    rim_df = top_rims.reset_index()
+                    rim_df.columns = ["Rim Model", "Build Count"]
+                    st.dataframe(rim_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No rim data available.")
+
+            with c_hub_col:
+                st.markdown("### ⚙️ Top 10 Hubs to Date")
+                if not top_hubs.empty:
+                    st.bar_chart(top_hubs, color="#FF9900")
+                    hub_df = top_hubs.reset_index()
+                    hub_df.columns = ["Hub Model", "Build Count"]
+                    st.dataframe(hub_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No hub data available.")
+
+            st.divider()
+
+            # 3. Spokes Consumption Analytics
+            st.markdown("### 📏 Spoke Volume Analytics")
+            spk_col1, spk_col2 = st.columns(2)
+            
+            with spk_col1:
+                st.markdown("**Spokes Used to Date (by Model)**")
+                if not df_spk.empty:
+                    spk_summary = df_spk.groupby("model")["count"].sum().sort_values(ascending=False)
+                    st.bar_chart(spk_summary, color="#00CCFF")
+                    spk_df = spk_summary.reset_index()
+                    spk_df.columns = ["Spoke Model", "Total Quantity Used"]
+                    st.dataframe(spk_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No spoke data available.")
+
+            with spk_col2:
+                st.markdown("**Monthly Spoke Consumption (by Month)**")
+                if not df_spk.empty:
+                    spk_monthly = df_spk.groupby("month")["count"].sum().sort_index()
+                    st.bar_chart(spk_monthly, color="#33FF66")
+                    spk_m_df = spk_monthly.reset_index()
+                    spk_m_df.columns = ["Month (YYYY-MM)", "Spokes Laced"]
+                    st.dataframe(spk_m_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No monthly spoke data available.")
+
+            if not df_spk.empty:
+                with st.expander("🔍 Detailed Monthly Spoke Breakdown by Model"):
+                    spk_pivot = df_spk.pivot_table(index="month", columns="model", values="count", aggfunc="sum", fill_value=0)
+                    st.dataframe(spk_pivot, use_container_width=True)
+
+            st.divider()
+
+            # 4. Nipples Consumption Analytics
+            st.markdown("### 🔩 Nipple Volume Analytics")
+            nip_col1, nip_col2 = st.columns(2)
+            
+            with nip_col1:
+                st.markdown("**Nipples Used to Date (by Model)**")
+                if not df_nip.empty:
+                    nip_summary = df_nip.groupby("model")["count"].sum().sort_values(ascending=False)
+                    st.bar_chart(nip_summary, color="#FF66CC")
+                    nip_df = nip_summary.reset_index()
+                    nip_df.columns = ["Nipple Model", "Total Quantity Used"]
+                    st.dataframe(nip_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No nipple data available.")
+
+            with nip_col2:
+                st.markdown("**Monthly Nipple Consumption (by Month)**")
+                if not df_nip.empty:
+                    nip_monthly = df_nip.groupby("month")["count"].sum().sort_index()
+                    st.bar_chart(nip_monthly, color="#FFCC00")
+                    nip_m_df = nip_monthly.reset_index()
+                    nip_m_df.columns = ["Month (YYYY-MM)", "Nipples Installed"]
+                    st.dataframe(nip_m_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No monthly nipple data available.")
+
+            if not df_nip.empty:
+                with st.expander("🔍 Detailed Monthly Nipple Breakdown by Model"):
+                    nip_pivot = df_nip.pivot_table(index="month", columns="model", values="count", aggfunc="sum", fill_value=0)
+                    st.dataframe(nip_pivot, use_container_width=True)
+
+    # -------------------------------------------------------------------------
+    # TAB 3: PROVEN RECIPES
+    # -------------------------------------------------------------------------
+    with tabs[3]:
         st.header("📜 Proven Recipe Archive")
         df_rec_tab = st.session_state.data["spoke_db"]
         if not df_rec_tab.empty:
@@ -887,9 +1087,9 @@ def render_admin_pipeline():
             st.dataframe(df_rec_tab[cols_to_show].sort_values('label'), use_container_width=True, hide_index=True)
 
     # -------------------------------------------------------------------------
-    # TAB 3: REGISTER NEW BUILD
+    # TAB 4: REGISTER NEW BUILD
     # -------------------------------------------------------------------------
-    with tabs[3]:
+    with tabs[4]:
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
@@ -1015,9 +1215,9 @@ def render_admin_pipeline():
                         st.error(f"❌ Failed to create build record. Error: {e}")
 
     # -------------------------------------------------------------------------
-    # TAB 4: LIBRARY MANAGEMENT
+    # TAB 5: LIBRARY MANAGEMENT
     # -------------------------------------------------------------------------
-    with tabs[4]:
+    with tabs[5]:
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
