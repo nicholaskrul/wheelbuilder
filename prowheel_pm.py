@@ -213,7 +213,7 @@ def fetch_master_bundle():
             bundle[table_name] = pd.DataFrame()
     return bundle
 
-# In-Memory Local Mutations (Saves 6 API calls per update/create)
+# In-Memory Local Mutations (Deduplicates records to prevent inflated count analytics)
 def update_local_record(table_name, record_id, updates):
     if 'data' not in st.session_state:
         st.session_state.data = fetch_master_bundle()
@@ -227,17 +227,31 @@ def add_local_record(table_name, record_dict):
     if 'data' not in st.session_state:
         st.session_state.data = fetch_master_bundle()
     df = st.session_state.data.get(table_name, pd.DataFrame())
+    rec_id = record_dict.get('id')
+    if not df.empty and rec_id and 'id' in df.columns:
+        df = df[df['id'] != rec_id]
     new_df = pd.DataFrame([record_dict])
     if df.empty:
         st.session_state.data[table_name] = new_df
     else:
         st.session_state.data[table_name] = pd.concat([df, new_df], ignore_index=True)
 
-def compute_workshop_analytics(bundle):
-    """Computes Workshop Trends analytics in-memory without making any Airtable API calls."""
+def compute_workshop_analytics(bundle, completed_only=False):
+    """Computes Workshop Trends analytics in-memory with strict deduplication."""
     df_builds = bundle.get("builds", pd.DataFrame())
     df_rims = bundle.get("rims", pd.DataFrame())
     
+    if df_builds.empty:
+        return {}
+
+    # 1. Deduplicate by unique build record ID to prevent double-counting
+    if 'id' in df_builds.columns:
+        df_builds = df_builds.drop_duplicates(subset=['id'], keep='last')
+
+    # 2. Filter by status scope if requested
+    if completed_only and 'status' in df_builds.columns:
+        df_builds = df_builds[df_builds['status'] == "Complete"]
+
     if df_builds.empty:
         return {}
 
@@ -256,7 +270,11 @@ def compute_workshop_analytics(bundle):
 
     for _, row in df_builds.iterrows():
         b_date = str(row.get('date', '')).strip()
-        month_str = b_date[:7] if (len(b_date) >= 7 and b_date[:4].isdigit()) else "Unspecified"
+        # Parse Month cleanly without defaulting unpopulated dates to current month
+        if b_date and b_date.lower() not in ["none", "nan", ""] and len(b_date) >= 7 and b_date[:4].isdigit():
+            month_str = b_date[:7]
+        else:
+            month_str = "Unspecified Date"
         
         f_rim = str(row.get('f_rim', '')).strip()
         r_rim = str(row.get('r_rim', '')).strip()
@@ -278,7 +296,7 @@ def compute_workshop_analytics(bundle):
                 all_hubs.append(f_hub)
             
             f_holes = rim_holes_map.get(f_rim.lower(), 28)
-            if f_holes == 0:
+            if f_holes <= 0 or f_holes > 48:
                 f_holes = 28
             
             spoke_records.append({"model": spk_model, "count": f_holes, "month": month_str})
@@ -292,7 +310,7 @@ def compute_workshop_analytics(bundle):
                 all_hubs.append(r_hub)
             
             r_holes = rim_holes_map.get(r_rim.lower(), 28)
-            if r_holes == 0:
+            if r_holes <= 0 or r_holes > 48:
                 r_holes = 28
             
             spoke_records.append({"model": spk_model, "count": r_holes, "month": month_str})
@@ -959,10 +977,18 @@ def render_admin_pipeline():
     with tabs[2]:
         st.subheader("📊 Workshop Trends & Analytics Dashboard")
         
-        analytics = compute_workshop_analytics(st.session_state.data)
+        # Scope Filter Toggle (Completed vs All Builds)
+        scope_choice = st.radio(
+            "Analytics Scope:", 
+            ["Completed Builds Only", "All Registered Builds (Active & Completed)"], 
+            horizontal=True
+        )
+        is_completed_only = (scope_choice == "Completed Builds Only")
+
+        analytics = compute_workshop_analytics(st.session_state.data, completed_only=is_completed_only)
         
         if not analytics or analytics.get("total_builds", 0) == 0:
-            st.info("No build records found for analytics processing.")
+            st.info("No build records found for the selected scope.")
         else:
             df_spk = analytics["df_spk"]
             df_nip = analytics["df_nip"]
@@ -975,7 +1001,7 @@ def render_admin_pipeline():
             # 1. Top Metrics Summary Row
             tm1, tm2, tm3, tm4 = st.columns(4)
             with tm1:
-                st.metric("🏆 Lifetime Builds Registered", analytics["total_builds"])
+                st.metric("🏆 Builds Analyzed", analytics["total_builds"])
             with tm2:
                 st.metric("🚲 Total Wheels Built", analytics["total_wheels"])
             with tm3:
