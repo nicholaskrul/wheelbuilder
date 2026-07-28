@@ -5,7 +5,7 @@ import secrets
 import string
 import math
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pyairtable import Api
 
 # =========================================================================
@@ -19,6 +19,7 @@ CACHE_DATA_TTL = 86400  # 24-hour cache TTL to minimize read requests on GitHub 
 WORKSHOP_CAPTION = "Workshop Command Center | Low-API Quota Engine Active"
 
 STATUS_STAGES = ["Order Received", "Parts Received", "Building", "Complete"]
+STOCK_ORDER_STAGES = ["Ordered", "Shipped", "Delivered", "Cancelled"]
 
 # =========================================================================
 # --- 2. AIRTABLE CONNECTION ENGINE ---
@@ -184,7 +185,8 @@ def fetch_master_bundle():
         "hubs": "hub", 
         "spokes": "spoke", 
         "nipples": "nipple", 
-        "spoke_db": "combo_id"
+        "spoke_db": "combo_id",
+        "stock_orders": "supplier"
     }
     bundle = {}
     for table_name, label_col in tables.items():
@@ -456,7 +458,7 @@ def render_admin_pipeline():
     st.title("🚲 Wheelbuilder Lab Command Center")
     st.caption(WORKSHOP_CAPTION)
     
-    tabs = st.tabs(["🏁 Workshop", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
+    tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
     # -------------------------------------------------------------------------
     # TAB 0: WORKSHOP PIPELINE
@@ -714,9 +716,145 @@ def render_admin_pipeline():
                                         st.rerun()
 
     # -------------------------------------------------------------------------
-    # TAB 1: PROVEN RECIPES
+    # TAB 1: STOCK ORDERS MODULE
     # -------------------------------------------------------------------------
     with tabs[1]:
+        st.subheader("🚚 Supplier Stock Orders & Delivery Tracker")
+        
+        df_stock = st.session_state.data.get("stock_orders", pd.DataFrame())
+        
+        # Summary Metrics
+        if not df_stock.empty and 'status' in df_stock.columns:
+            active_stock = df_stock[~df_stock['status'].isin(["Delivered", "Cancelled"])]
+            delivered_stock = df_stock[df_stock['status'] == "Delivered"]
+            
+            # Check upcoming/overdue ETAs
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            arriving_soon = active_stock[active_stock['eta'].fillna("").astype(str) <= (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")]
+            
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("📦 Active Supplier Orders", len(active_stock))
+            with m2:
+                st.metric("⏳ Arriving Soon / Pending", len(arriving_soon))
+            with m3:
+                st.metric("✅ Delivered Orders Archive", len(delivered_stock))
+        else:
+            active_stock = pd.DataFrame()
+            delivered_stock = pd.DataFrame()
+            st.info("No supplier stock orders recorded yet.")
+
+        st.divider()
+
+        # Log New Stock Order Form
+        with st.expander("➕ Log New Supplier Stock Order", expanded=df_stock.empty):
+            with st.form("new_stock_order_form"):
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    sup_name = st.text_input("Supplier Name *", placeholder="e.g. DT Swiss / Wheelbuilder Supplies")
+                    st_order_date = st.date_input("Order Date", datetime.now())
+                with sc2:
+                    st_status = st.selectbox("Initial Status", STOCK_ORDER_STAGES, index=0)
+                    st_eta_date = st.date_input("Estimated Delivery (ETA)", datetime.now() + timedelta(days=7))
+
+                st_items = st.text_area("Product Items & Quantities *", placeholder="e.g. 50x DT Competition Spokes 292mm\n20x Brass Nipples 12mm\n2x RR481 Rims 28H")
+                st_track = st.text_input("Courier Tracking Number / Link (Optional)")
+                st_notes = st.text_area("Order Notes / PO Reference (Optional)")
+
+                if st.form_submit_button("🚀 Save Stock Order"):
+                    if sup_name and st_items:
+                        order_payload = {
+                            "supplier": sup_name,
+                            "order_date": st_order_date.strftime("%Y-%m-%d"),
+                            "eta": st_eta_date.strftime("%Y-%m-%d"),
+                            "status": st_status,
+                            "items": st_items,
+                            "tracking_info": st_track,
+                            "notes": st_notes
+                        }
+                        try:
+                            # 1 Write API Call
+                            new_rec = base.table("stock_orders").create(order_payload)
+                            order_payload["id"] = new_rec["id"]
+                            add_local_record("stock_orders", order_payload)
+                            st.toast("✅ Stock Order Logged!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Failed to log stock order. Please check Airtable table 'stock_orders' exists. Error: {e}")
+                    else:
+                        st.error("Please enter a Supplier Name and Product Items.")
+
+        # Active Stock Orders Display
+        if not active_stock.empty:
+            st.write(f"### 📦 Pending Stock Shipments ({len(active_stock)})")
+            for _, s_row in active_stock.iterrows():
+                s_id = s_row['id']
+                s_status = s_row.get('status', 'Ordered')
+                s_supplier = s_row.get('supplier', 'Unknown Supplier')
+                s_eta = s_row.get('eta', 'TBD')
+                s_tracking = s_row.get('tracking_info', '')
+                has_so_track = isinstance(s_tracking, str) and bool(s_tracking.strip()) and s_tracking.lower() not in ["none", "nan"]
+
+                with st.expander(f"🚚 {s_supplier} — Status: {s_status} | ETA: {s_eta}{' 🚚' if has_so_track else ''}"):
+                    sc_col1, sc_col2 = st.columns([3, 2])
+                    with sc_col1:
+                        st.markdown("**📦 Products & Quantities:**")
+                        st.code(s_row.get('items', 'No items listed'), language="text")
+                        if s_row.get('notes') and str(s_row.get('notes')).lower() not in ["none", "nan", ""]:
+                            st.caption(f"📝 Notes: {s_row.get('notes')}")
+                    with sc_col2:
+                        st.markdown(f"**Order Date:** {s_row.get('order_date', 'TBD')}")
+                        st.markdown(f"**Delivery ETA:** {s_eta}")
+                        
+                        # Update Status
+                        new_so_s = st.selectbox(
+                            "Update Status", 
+                            STOCK_ORDER_STAGES, 
+                            index=STOCK_ORDER_STAGES.index(s_status) if s_status in STOCK_ORDER_STAGES else 0,
+                            key=f"so_s_{s_id}"
+                        )
+                        if new_so_s != s_status:
+                            success, msg = safe_airtable_update("stock_orders", s_id, {"status": new_so_s})
+                            if success:
+                                update_local_record("stock_orders", s_id, {"status": new_so_s})
+                                st.toast(f"Stock Order status updated to {new_so_s}!")
+                                st.rerun()
+
+                        if has_so_track:
+                            if s_tracking.startswith("http"):
+                                st.link_button("🚚 Track Package", s_tracking, use_container_width=True)
+                            else:
+                                st.info(f"Tracking Number: {s_tracking}")
+
+                        # Edit Order Details Popover
+                        with st.popover("✏️ Edit Order & Tracking"):
+                            edit_eta = st.text_input("Delivery ETA (YYYY-MM-DD)", value=str(s_eta), key=f"so_eta_{s_id}")
+                            edit_track = st.text_input("Tracking Info / URL", value=str(s_tracking) if has_so_track else "", key=f"so_tr_{s_id}")
+                            edit_notes = st.text_area("Notes", value=str(s_row.get('notes', '')), key=f"so_nt_{s_id}")
+                            
+                            if st.button("Save Order Edits", key=f"so_btn_{s_id}", use_container_width=True):
+                                updates = {"eta": edit_eta, "tracking_info": edit_track, "notes": edit_notes}
+                                success, msg = safe_airtable_update("stock_orders", s_id, updates)
+                                if success:
+                                    update_local_record("stock_orders", s_id, updates)
+                                    st.toast("Order details updated!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+
+        # Delivered & Archive Section
+        if not delivered_stock.empty:
+            st.divider()
+            with st.expander(f"📁 Delivered Stock Order History ({len(delivered_stock)})"):
+                for _, s_row in delivered_stock.iterrows():
+                    st.markdown(f"**✅ {s_row.get('supplier')}** (Ordered: {s_row.get('order_date', 'N/A')} | ETA: {s_row.get('eta', 'N/A')})")
+                    st.code(s_row.get('items', ''), language="text")
+                    st.write("---")
+
+    # -------------------------------------------------------------------------
+    # TAB 2: PROVEN RECIPES
+    # -------------------------------------------------------------------------
+    with tabs[2]:
         st.header("📜 Proven Recipe Archive")
         df_rec_tab = st.session_state.data["spoke_db"]
         if not df_rec_tab.empty:
@@ -727,9 +865,9 @@ def render_admin_pipeline():
             st.dataframe(df_rec_tab[cols_to_show].sort_values('label'), use_container_width=True, hide_index=True)
 
     # -------------------------------------------------------------------------
-    # TAB 2: REGISTER NEW BUILD
+    # TAB 3: REGISTER NEW BUILD
     # -------------------------------------------------------------------------
-    with tabs[2]:
+    with tabs[3]:
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
@@ -855,9 +993,9 @@ def render_admin_pipeline():
                         st.error(f"❌ Failed to create build record. Error: {e}")
 
     # -------------------------------------------------------------------------
-    # TAB 3: LIBRARY MANAGEMENT
+    # TAB 4: LIBRARY MANAGEMENT
     # -------------------------------------------------------------------------
-    with tabs[3]:
+    with tabs[4]:
         st.header("📦 Library Management")
         with st.expander("➕ Add New Component"):
             cat = st.radio("Category", ["Rim", "Hub", "Spoke", "Nipple"], horizontal=True)
