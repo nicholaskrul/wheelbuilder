@@ -1003,15 +1003,13 @@ def render_admin_pipeline():
             tot_nipples = df_nip['count'].sum() if not df_nip.empty else 0
 
             # 1. Top Metrics Summary Row
-            tm1, tm2, tm3, tm4 = st.columns(4)
+            tm1, tm2, tm3 = st.columns(3)
             with tm1:
                 st.metric("🏆 Builds Analyzed", analytics["total_builds"])
             with tm2:
                 st.metric("🚲 Total Wheels Built", analytics["total_wheels"])
             with tm3:
                 st.metric("📏 Total Spokes Laced", f"{tot_spokes:,}")
-            with tm4:
-                st.metric("🔩 Total Nipples Installed", f"{tot_nipples:,}")
 
             st.divider()
 
