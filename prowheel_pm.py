@@ -560,8 +560,15 @@ def render_admin_pipeline():
         st.cache_data.clear()
         st.session_state.data = fetch_master_bundle()
 
-    st.title("🚲 Wheelbuilder Lab Command Center")
-    st.caption(WORKSHOP_CAPTION)
+    col_logo_adm, col_title_adm = st.columns([1, 6], vertical_alignment="center")
+    with col_logo_adm:
+        try:
+            st.image("WB_logo.png", width=140)
+        except Exception:
+            st.markdown("## 🚲")
+    with col_title_adm:
+        st.markdown("# Wheelbuilder Lab Command Center")
+        st.caption(WORKSHOP_CAPTION)
     
     tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📊 Trends", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
