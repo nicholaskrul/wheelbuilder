@@ -77,14 +77,14 @@ def safe_int(val, default=0):
             return default
 
 def safe_airtable_update(table_name, record_id, updates):
-    """Safely updates Airtable records without crashing Streamlit on missing schema columns."""
+    """Safely updates Airtable records with typecasting enabled to prevent Single Select / Date field errors."""
     try:
-        base.table(table_name).update(record_id, updates)
+        base.table(table_name).update(record_id, updates, typecast=True)
         return True, "Updated successfully!"
     except Exception as e:
         err_msg = str(e)
         if "UNKNOWN_FIELD_NAME" in err_msg or "422" in err_msg:
-            return False, "❌ Airtable Error: Please ensure columns exist in your Airtable base!"
+            return False, f"❌ Airtable Error: Please ensure columns exist in your Airtable base! Details: {err_msg}"
         return False, f"❌ Update Failed: {err_msg}"
 
 def get_comp_data_from_bundle(bundle, table_key, label):
@@ -728,7 +728,6 @@ def render_admin_pipeline():
             active_stock = df_stock[~df_stock['status'].isin(["Delivered", "Cancelled"])]
             delivered_stock = df_stock[df_stock['status'] == "Delivered"]
             
-            # Check upcoming/overdue ETAs
             today_str = datetime.now().strftime("%Y-%m-%d")
             arriving_soon = active_stock[active_stock['eta'].fillna("").astype(str) <= (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")]
             
@@ -773,8 +772,8 @@ def render_admin_pipeline():
                             "notes": st_notes
                         }
                         try:
-                            # 1 Write API Call
-                            new_rec = base.table("stock_orders").create(order_payload)
+                            # 1 Write API Call with typecast=True to auto-parse Single Select & Date types in Airtable
+                            new_rec = base.table("stock_orders").create(order_payload, typecast=True)
                             order_payload["id"] = new_rec["id"]
                             add_local_record("stock_orders", order_payload)
                             st.toast("✅ Stock Order Logged!")
@@ -819,6 +818,8 @@ def render_admin_pipeline():
                                 update_local_record("stock_orders", s_id, {"status": new_so_s})
                                 st.toast(f"Stock Order status updated to {new_so_s}!")
                                 st.rerun()
+                            else:
+                                st.error(msg)
 
                         if has_so_track:
                             if s_tracking.startswith("http"):
@@ -937,8 +938,8 @@ def render_admin_pipeline():
                     }
                     
                     try:
-                        # 1 API Call to create build record
-                        new_rec = base.table("builds").create(payload)
+                        # 1 API Call to create build record with typecast=True
+                        new_rec = base.table("builds").create(payload, typecast=True)
                         rec_id = new_rec["id"]
                         
                         wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
@@ -975,10 +976,10 @@ def render_admin_pipeline():
                                     if not exist_match.empty:
                                         recipe_row = exist_match.iloc[0]
                                         new_count = safe_int(recipe_row.get('build_count', 1)) + 1
-                                        db_table.update(recipe_row['id'], {"build_count": new_count, "len_l": l, "len_r": rr})
+                                        db_table.update(recipe_row['id'], {"build_count": new_count, "len_l": l, "len_r": rr}, typecast=True)
                                         update_local_record("spoke_db", recipe_row['id'], {"build_count": new_count, "len_l": l, "len_r": rr})
                                     else:
-                                        new_rec_spk = db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                                        new_rec_spk = db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1}, typecast=True)
                                         add_local_record("spoke_db", {
                                             "id": new_rec_spk["id"],
                                             "label": fp,
@@ -1028,7 +1029,7 @@ def render_admin_pipeline():
                 if st.form_submit_button("Save to Database"):
                     if name: 
                         table_key = f"{cat.lower()}s"
-                        new_rec = base.table(table_key).create(p)
+                        new_rec = base.table(table_key).create(p, typecast=True)
                         p["id"] = new_rec["id"]
                         p["label"] = name
                         add_local_record(table_key, p)
