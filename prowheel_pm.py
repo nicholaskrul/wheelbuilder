@@ -752,12 +752,13 @@ def render_admin_pipeline():
                 with sc1:
                     sup_name = st.text_input("Supplier Name *", placeholder="e.g. DT Swiss / Wheelbuilder Supplies")
                     st_order_date = st.date_input("Order Date", datetime.now())
+                    sup_inv = st.text_input("Supplier Invoice URL / Ref (Optional)", placeholder="e.g. INV-2026-089 or https://...")
                 with sc2:
                     st_status = st.selectbox("Initial Status", STOCK_ORDER_STAGES, index=0)
                     st_eta_date = st.date_input("Estimated Delivery (ETA)", datetime.now() + timedelta(days=7))
+                    st_track = st.text_input("Courier Tracking Number / Link (Optional)")
 
                 st_items = st.text_area("Product Items & Quantities *", placeholder="e.g. 50x DT Competition Spokes 292mm\n20x Brass Nipples 12mm\n2x RR481 Rims 28H")
-                st_track = st.text_input("Courier Tracking Number / Link (Optional)")
                 st_notes = st.text_area("Order Notes / PO Reference (Optional)")
 
                 if st.form_submit_button("🚀 Save Stock Order"):
@@ -768,11 +769,12 @@ def render_admin_pipeline():
                             "eta": st_eta_date.strftime("%Y-%m-%d"),
                             "status": st_status,
                             "items": st_items,
+                            "supplier_invoice": sup_inv,
                             "tracking_info": st_track,
                             "notes": st_notes
                         }
                         try:
-                            # 1 Write API Call with typecast=True to auto-parse Single Select & Date types in Airtable
+                            # 1 Write API Call with typecast=True
                             new_rec = base.table("stock_orders").create(order_payload, typecast=True)
                             order_payload["id"] = new_rec["id"]
                             add_local_record("stock_orders", order_payload)
@@ -792,7 +794,10 @@ def render_admin_pipeline():
                 s_supplier = s_row.get('supplier', 'Unknown Supplier')
                 s_eta = s_row.get('eta', 'TBD')
                 s_tracking = s_row.get('tracking_info', '')
+                s_invoice = s_row.get('supplier_invoice', '')
+                
                 has_so_track = isinstance(s_tracking, str) and bool(s_tracking.strip()) and s_tracking.lower() not in ["none", "nan"]
+                has_so_inv = isinstance(s_invoice, str) and bool(s_invoice.strip()) and s_invoice.lower() not in ["none", "nan"]
 
                 with st.expander(f"🚚 {s_supplier} — Status: {s_status} | ETA: {s_eta}{' 🚚' if has_so_track else ''}"):
                     sc_col1, sc_col2 = st.columns([3, 2])
@@ -821,20 +826,34 @@ def render_admin_pipeline():
                             else:
                                 st.error(msg)
 
+                        # Tracking Link / Info
                         if has_so_track:
-                            if s_tracking.startswith("http"):
+                            if str(s_tracking).startswith("http"):
                                 st.link_button("🚚 Track Package", s_tracking, use_container_width=True)
                             else:
-                                st.info(f"Tracking Number: {s_tracking}")
+                                st.info(f"Courier Ref: {s_tracking}")
+
+                        # Supplier Invoice Link / Info
+                        if has_so_inv:
+                            if str(s_invoice).startswith("http"):
+                                st.link_button("📄 View Supplier Invoice", s_invoice, use_container_width=True)
+                            else:
+                                st.caption(f"📄 Invoice Ref: {s_invoice}")
 
                         # Edit Order Details Popover
-                        with st.popover("✏️ Edit Order & Tracking"):
+                        with st.popover("✏️ Edit Order, Invoice & Tracking"):
                             edit_eta = st.text_input("Delivery ETA (YYYY-MM-DD)", value=str(s_eta), key=f"so_eta_{s_id}")
+                            edit_inv = st.text_input("Supplier Invoice URL / Ref", value=str(s_invoice) if has_so_inv else "", key=f"so_inv_{s_id}")
                             edit_track = st.text_input("Tracking Info / URL", value=str(s_tracking) if has_so_track else "", key=f"so_tr_{s_id}")
                             edit_notes = st.text_area("Notes", value=str(s_row.get('notes', '')), key=f"so_nt_{s_id}")
                             
                             if st.button("Save Order Edits", key=f"so_btn_{s_id}", use_container_width=True):
-                                updates = {"eta": edit_eta, "tracking_info": edit_track, "notes": edit_notes}
+                                updates = {
+                                    "eta": edit_eta, 
+                                    "supplier_invoice": edit_inv,
+                                    "tracking_info": edit_track, 
+                                    "notes": edit_notes
+                                }
                                 success, msg = safe_airtable_update("stock_orders", s_id, updates)
                                 if success:
                                     update_local_record("stock_orders", s_id, updates)
@@ -848,7 +867,9 @@ def render_admin_pipeline():
             st.divider()
             with st.expander(f"📁 Delivered Stock Order History ({len(delivered_stock)})"):
                 for _, s_row in delivered_stock.iterrows():
-                    st.markdown(f"**✅ {s_row.get('supplier')}** (Ordered: {s_row.get('order_date', 'N/A')} | ETA: {s_row.get('eta', 'N/A')})")
+                    inv_ref = str(s_row.get('supplier_invoice', '')).strip()
+                    inv_lbl = f" | Invoice: {inv_ref}" if inv_ref and inv_ref.lower() not in ["none", "nan"] else ""
+                    st.markdown(f"**✅ {s_row.get('supplier')}** (Ordered: {s_row.get('order_date', 'N/A')} | ETA: {s_row.get('eta', 'N/A')}{inv_lbl})")
                     st.code(s_row.get('items', ''), language="text")
                     st.write("---")
 
