@@ -11,14 +11,13 @@ from pyairtable import Api
 # =========================================================================
 # --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
 # =========================================================================
-st.set_page_config(page_title="Wheelbuilder Lab Command Center v29", layout="wide", page_icon="🚲")
+st.set_page_config(page_title="Wheelbuilder Lab Command Center", layout="wide", page_icon="🚲")
 
 LIVE_DOMAIN = "https://wheelbuilder.streamlit.app" if "localhost" not in st.secrets.get("airtable", {}).get("base_id", "") else "http://localhost:8501"
 GOOGLE_REVIEW_URL = "https://g.page/r/CVj8dcB7IKHrEAE/review"
-CACHE_DATA_TTL = 3600  
-WORKSHOP_CAPTION = "Workshop Command Center | Production Environment Enabled"
+CACHE_DATA_TTL = 86400  # 24-hour cache TTL to minimize read requests on GitHub / Streamlit Cloud
+WORKSHOP_CAPTION = "Workshop Command Center | Low-API Quota Engine Active"
 
-STAFF_SECRET_KEY = "LAB_STAFF_2026"
 STATUS_STAGES = ["Order Received", "Parts Received", "Building", "Complete"]
 
 # =========================================================================
@@ -84,15 +83,20 @@ def safe_airtable_update(table_name, record_id, updates):
     except Exception as e:
         err_msg = str(e)
         if "UNKNOWN_FIELD_NAME" in err_msg or "422" in err_msg:
-            return False, "❌ Airtable Error: Please ensure columns 'phone', 'email', 'wp_page_password', and 'wp_page_url' exist in your Airtable 'builds' table!"
+            return False, "❌ Airtable Error: Please ensure columns exist in your Airtable base!"
         return False, f"❌ Update Failed: {err_msg}"
 
 def get_comp_data_from_bundle(bundle, table_key, label):
-    if not label or label == "None": return {}
+    if not label or str(label).lower().strip() in ["none", "nan", ""]: 
+        return {}
     df = bundle.get(table_key, pd.DataFrame())
-    if df.empty: return {}
-    match = df[df['label'].str.lower() == str(label).lower().strip()]
-    return match.iloc[0].to_dict() if not match.empty else {}
+    if df.empty or 'label' not in df.columns: 
+        return {}
+    target = str(label).lower().strip()
+    match = df[df['label'].astype(str).str.strip().str.lower() == target]
+    if not match.empty:
+        return match.iloc[0].to_dict()
+    return {}
 
 def calculate_wheel_weights(row, bundle):
     """Calculates weights dynamically using defensive type-safe parsing engines."""
@@ -103,10 +107,12 @@ def calculate_wheel_weights(row, bundle):
     u_nip = safe_float(nip_data.get('weight', 0))
 
     f_res = {"total": 0.0, "exists": False}
-    if row.get('f_rim') and row.get('f_rim') != "None":
+    if row.get('f_rim') and str(row.get('f_rim')).lower().strip() != "none":
         frd = get_comp_data_from_bundle(bundle, "rims", row.get('f_rim'))
         fhd = get_comp_data_from_bundle(bundle, "hubs", row.get('f_hub'))
         h = int(safe_float(frd.get('holes', 0)))
+        if h == 0:
+            h = 28  # Fallback default spoke count if unspecified
         f_res.update({
             "exists": True, 
             "rim_w": safe_float(frd.get('weight', 0)), 
@@ -115,10 +121,12 @@ def calculate_wheel_weights(row, bundle):
         f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
 
     r_res = {"total": 0.0, "exists": False}
-    if row.get('r_rim') and row.get('r_rim') != "None":
+    if row.get('r_rim') and str(row.get('r_rim')).lower().strip() != "none":
         rrd = get_comp_data_from_bundle(bundle, "rims", row.get('r_rim'))
         rhd = get_comp_data_from_bundle(bundle, "hubs", row.get('r_hub'))
         h = int(safe_float(rrd.get('holes', 0)))
+        if h == 0:
+            h = 28  # Fallback default spoke count if unspecified
         r_res.update({
             "exists": True, 
             "rim_w": safe_float(rrd.get('weight', 0)), 
@@ -130,7 +138,8 @@ def calculate_wheel_weights(row, bundle):
 
 def format_clean_phone(phone_str):
     """Cleans phone numbers for WhatsApp integration (e.g., 27821234567)."""
-    if not phone_str: return ""
+    if not phone_str: 
+        return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("0"):
         clean = "27" + clean[1:]  # Default South Africa format
@@ -138,7 +147,8 @@ def format_clean_phone(phone_str):
 
 def format_10digit_phone(phone_str):
     """Standardises phone numbers to a 10-digit format (e.g. 0821234567) for portal passwords."""
-    if not phone_str: return ""
+    if not phone_str: 
+        return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("27") and len(clean) == 11:
         clean = "0" + clean[2:]
@@ -165,9 +175,17 @@ def generate_update_message(customer_name, status, portal_url, passkey):
     )
     return msg
 
-@st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Fetching Workshop Data...")
+@st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Syncing Workshop Data...")
 def fetch_master_bundle():
-    tables = {"builds": "customer", "rims": "rim", "hubs": "hub", "spokes": "spoke", "nipples": "nipple", "spoke_db": "combo_id"}
+    """Fetches full bundle from Airtable and caches in memory across user sessions."""
+    tables = {
+        "builds": "customer", 
+        "rims": "rim", 
+        "hubs": "hub", 
+        "spokes": "spoke", 
+        "nipples": "nipple", 
+        "spoke_db": "combo_id"
+    }
     bundle = {}
     for table_name, label_col in tables.items():
         try:
@@ -184,32 +202,41 @@ def fetch_master_bundle():
                 data.append(fields)
             df = pd.DataFrame(data)
             for col in df.columns:
-                df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) else x)
+                # Fix IndexError on empty list fields returned from Airtable
+                df[col] = df[col].apply(
+                    lambda x: x[0] if (isinstance(x, list) and len(x) > 0) else (None if isinstance(x, list) else x)
+                )
             bundle[table_name] = df
-            time.sleep(0.1)
         except Exception:
             bundle[table_name] = pd.DataFrame()
     return bundle
+
+# In-Memory Local Mutations (Saves 6 API calls per update/create)
+def update_local_record(table_name, record_id, updates):
+    if 'data' not in st.session_state:
+        st.session_state.data = fetch_master_bundle()
+    df = st.session_state.data.get(table_name, pd.DataFrame())
+    if not df.empty and record_id in df['id'].values:
+        for key, val in updates.items():
+            df.loc[df['id'] == record_id, key] = val
+        st.session_state.data[table_name] = df
+
+def add_local_record(table_name, record_dict):
+    if 'data' not in st.session_state:
+        st.session_state.data = fetch_master_bundle()
+    df = st.session_state.data.get(table_name, pd.DataFrame())
+    new_df = pd.DataFrame([record_dict])
+    if df.empty:
+        st.session_state.data[table_name] = new_df
+    else:
+        st.session_state.data[table_name] = pd.concat([df, new_df], ignore_index=True)
 
 # =========================================================================
 # --- 4. FUNCTIONAL PAGE MODULES ---
 # =========================================================================
 
 def render_client_portal():
-    """Client View Module: Securely loads isolated user spec profiles & live progress."""
-    # --- SILENT WEBSOCKET HEARTBEAT (PREVENTS BROWSER SESSIONS FROM TIMING OUT) ---
-    st.components.v1.html(
-        """
-        <script>
-            setInterval(function() {
-                window.dispatchEvent(new Event('resize'));
-            }, 45000);
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
+    """Client View Module: Zero API Calls when reading from cached bundle."""
     # --- BLACK BRANDING THEME INJECTION ---
     st.markdown("""
         <style>
@@ -242,16 +269,29 @@ def render_client_portal():
         </style>
     """, unsafe_allow_html=True)
 
-    target_build_id = st.query_params["build"]
-    try:
-        record = base.table("builds").get(target_build_id)
-        row = record.get("fields", {})
-        row["id"] = record.get("id")
-    except Exception:
-        st.error("❌ Invalid or expired build link reference.")
+    target_build_id = st.query_params.get("build")
+    if not target_build_id:
+        st.error("❌ No build specified.")
         return
 
-    # --- BRAND LOGO & HEADER ROW (LEFT ALIGNED) ---
+    # Use session state or cached bundle (0 API calls!)
+    bundle = st.session_state.get('data', fetch_master_bundle())
+    df_builds = bundle.get("builds", pd.DataFrame())
+
+    row = {}
+    if not df_builds.empty and target_build_id in df_builds['id'].values:
+        row = df_builds[df_builds['id'] == target_build_id].iloc[0].to_dict()
+    else:
+        # Fallback to single record fetch if missing from memory
+        try:
+            record = base.table("builds").get(target_build_id)
+            row = record.get("fields", {})
+            row["id"] = record.get("id")
+        except Exception:
+            st.error("❌ Invalid or expired build link reference.")
+            return
+
+    # --- BRAND LOGO & HEADER ROW ---
     col_logo, col_title = st.columns([1, 4], vertical_alignment="center")
     with col_logo:
         try:
@@ -275,7 +315,6 @@ def render_client_portal():
         raw_pass = row.get("wp_page_password")
         raw_phone = row.get("phone", "")
         
-        # Determine expected password (stored password or formatted phone number)
         expected_pass = format_10digit_phone(raw_pass) if (raw_pass and str(raw_pass).lower() not in ["none", "nan", ""]) else format_10digit_phone(raw_phone)
 
         if not expected_pass:
@@ -289,7 +328,6 @@ def render_client_portal():
             st.info("Please enter your 10-digit registered phone number to unlock your custom build portal.")
             return
         
-        # Compare cleaned inputs
         clean_user_input = format_10digit_phone(user_input)
         if clean_user_input != expected_pass and user_input.strip() != str(raw_pass).strip():
             st.error("❌ Incorrect phone number.")
@@ -316,7 +354,6 @@ def render_client_portal():
                 
     st.progress((current_idx + 1) / len(STATUS_STAGES))
 
-    # --- WORKSHOP NOTES SECTION ---
     build_notes = str(row.get('notes', '')).strip()
     if build_notes and build_notes.lower() not in ["none", "nan", ""]:
         st.info(f"📢 **Workshop Update Note:** {build_notes}")
@@ -324,7 +361,6 @@ def render_client_portal():
     st.divider()
 
     # --- DYNAMIC WEIGHT COMPUTATION ENGINE ---
-    bundle = fetch_master_bundle()
     f_res, r_res = calculate_wheel_weights(row, bundle)
 
     f_weight_snap = safe_int(row.get("f_weight", 0))
@@ -333,10 +369,10 @@ def render_client_portal():
     f_weight_disp = f_weight_snap if f_weight_snap > 0 else safe_int(f_res["total"])
     r_weight_disp = r_weight_snap if r_weight_snap > 0 else safe_int(r_res["total"])
 
-    f_exists = f_res["exists"] or (bool(row.get('f_rim')) and row.get('f_rim') != "None")
-    r_exists = r_res["exists"] or (bool(row.get('r_rim')) and row.get('r_rim') != "None")
+    f_exists = f_res["exists"] or (bool(row.get('f_rim')) and str(row.get('f_rim')).lower() != "none")
+    r_exists = r_res["exists"] or (bool(row.get('r_rim')) and str(row.get('r_rim')).lower() != "none")
 
-    st.markdown(f"## Custom Wheelset Build Sheet")
+    st.markdown("## Custom Wheelset Build Sheet")
     st.markdown(f"**Client Profile:** {row.get('customer')} | **Registered:** {row.get('date')}")
     st.write("Welcome to your custom wheel build tracker! Component specs and weights update here dynamically.")
     st.success("✨ **Warranty Record:** Your wheels come with a lifetime warranty on workmanship and spokes.")
@@ -377,24 +413,23 @@ def render_client_portal():
     gallery_url = str(row.get('gallery_url', '')).strip()
 
     with c_btn1:
-        if inv_url and inv_url.lower() not in ['none', 'nan', '']: st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
+        if inv_url and inv_url.lower() not in ['none', 'nan', '']:
+            st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
     with c_btn2:
-        if track_url and track_url.lower() not in ['none', 'nan', '']: st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
+        if track_url and track_url.lower() not in ['none', 'nan', '']:
+            st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
-        if gallery_url and gallery_url.lower() not in ['none', 'nan', '']: st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
+        if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
+            st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
         st.link_button("⭐️ Leave a Google Review", GOOGLE_REVIEW_URL, use_container_width=True)
 
 
 def render_admin_pipeline():
-    """Administrative View Module: Houses complete builder console workflows."""
-    if "admin_authenticated" not in st.session_state: st.session_state.admin_authenticated = False
+    """Administrative View Module: Low API Quota Builders Console."""
+    if "admin_authenticated" not in st.session_state: 
+        st.session_state.admin_authenticated = False
 
-    # 1. Check URL query token for persistent device binding
-    if "staff" in st.query_params and st.query_params["staff"] == STAFF_SECRET_KEY:
-        st.session_state.admin_authenticated = True
-
-    # 2. Render Login Screen if not authenticated
     if not st.session_state.admin_authenticated:
         st.markdown("<h2 style='margin-top:40px;'>🔓 Workshop Administration Panel</h2>", unsafe_allow_html=True)
         st.divider()
@@ -402,25 +437,21 @@ def render_admin_pipeline():
         with c_login:
             user_entered_password = st.text_input("Enter Master Password:", type="password")
             if st.button("Unlock Workshop Console", use_container_width=True):
-                if user_entered_password == st.secrets["admin"]["password"]:
+                admin_pass = st.secrets.get("admin", {}).get("password", "")
+                if user_entered_password and user_entered_password == admin_pass:
                     st.session_state.admin_authenticated = True
-                    # Bind device persistent token directly to browser URL
-                    st.query_params["staff"] = STAFF_SECRET_KEY
-                    st.toast("Device Bound & Authenticated!")
+                    st.toast("Authenticated!")
                     st.rerun()
                 else: 
                     st.error("❌ Invalid Password.")
         return
 
-    if 'data' not in st.session_state: st.session_state.data = fetch_master_bundle()
+    if 'data' not in st.session_state: 
+        st.session_state.data = fetch_master_bundle()
+
     def refresh_api():
         st.cache_data.clear()
         st.session_state.data = fetch_master_bundle()
-    def update_local_record(table_name, record_id, updates):
-        df = st.session_state.data[table_name]
-        if not df.empty and record_id in df['id'].values:
-            for key, val in updates.items(): df.loc[df['id'] == record_id, key] = val
-            st.session_state.data[table_name] = df
 
     st.title("🚲 Wheelbuilder Lab Command Center")
     st.caption(WORKSHOP_CAPTION)
@@ -432,18 +463,21 @@ def render_admin_pipeline():
     # -------------------------------------------------------------------------
     with tabs[0]:
         c_head, c_sync, c_logout = st.columns([4, 1, 1])
-        with c_head: st.subheader("🏁 Workshop Pipeline")
+        with c_head:
+            st.subheader("🏁 Workshop Pipeline")
         with c_sync:
-            if st.button("🔄 Force Sync", use_container_width=True): refresh_api(); st.rerun()
+            if st.button("🔄 Force Sync", use_container_width=True, help="Only click if you made manual edits in Airtable web UI"):
+                refresh_api()
+                st.toast("Re-synced with Airtable!")
+                st.rerun()
         with c_logout:
             if st.button("🔒 Lock Console", use_container_width=True):
                 st.session_state.admin_authenticated = False
-                if "staff" in st.query_params:
-                    del st.query_params["staff"]
                 st.rerun()
 
         df_builds = st.session_state.data["builds"]
-        if df_builds.empty: st.info("No active builds found.")
+        if df_builds.empty: 
+            st.info("No active builds found.")
         else:
             active_mask = df_builds['status'].fillna("Order Received") != "Complete"
             active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
@@ -466,7 +500,8 @@ def render_admin_pipeline():
                             st.caption(f"{row.get('f_hub')}")
                             st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
                             st.metric("Est Weight", f"{safe_int(f_res['total'])}g")
-                        else: st.write("---")
+                        else:
+                            st.write("---")
                     with c2:
                         st.markdown("**🔘 REAR**")
                         if r_res["exists"]:
@@ -474,16 +509,22 @@ def render_admin_pipeline():
                             st.caption(f"{row.get('r_hub')}")
                             st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                             st.metric("Est Weight", f"{safe_int(r_res['total'])}g")
-                        else: st.write("---")
+                        else:
+                            st.write("---")
                     with c3:
-                        if f_res["exists"] or r_res["exists"]: st.metric("📦 EST SET", f"{safe_int(f_res['total'] + r_res['total'])}g")
+                        if f_res["exists"] or r_res["exists"]:
+                            st.metric("📦 EST SET", f"{safe_int(f_res['total'] + r_res['total'])}g")
                         cur = row.get('status', 'Order Received')
-                        new_s = st.selectbox("Status", STATUS_STAGES, index=STATUS_STAGES.index(cur) if cur in STATUS_STAGES else 0, key=f"s_{row['id']}")
+                        new_s = st.selectbox(
+                            "Status", 
+                            STATUS_STAGES, 
+                            index=STATUS_STAGES.index(cur) if cur in STATUS_STAGES else 0, 
+                            key=f"s_{row['id']}"
+                        )
                         
                         if new_s != cur:
                             updates = {"status": new_s}
 
-                            # AUTO-GENERATE / ENSURE 10-DIGIT PHONE PASSKEY FOR EXISTING BUILDS IF MISSING
                             wp_pass = row.get("wp_page_password")
                             if not wp_pass or str(wp_pass).lower() in ["none", "nan", ""]:
                                 phone_10 = format_10digit_phone(row.get("phone", ""))
@@ -497,8 +538,13 @@ def render_admin_pipeline():
                             if new_s == "Complete":
                                 f_wt_snap = safe_int(f_res["total"]) if f_res["exists"] else 0
                                 r_wt_snap = safe_int(r_res["total"]) if r_res["exists"] else 0
-                                updates.update({"date": datetime.now().strftime("%Y-%m-%d"), "f_weight": f_wt_snap, "r_weight": r_wt_snap})
+                                updates.update({
+                                    "date": datetime.now().strftime("%Y-%m-%d"), 
+                                    "f_weight": f_wt_snap, 
+                                    "r_weight": r_wt_snap
+                                })
                             
+                            # 1 Update API Call + 0 Read API Calls (Mutate local memory)
                             success, msg = safe_airtable_update("builds", row['id'], updates)
                             if success:
                                 update_local_record("builds", row['id'], updates)
@@ -507,7 +553,6 @@ def render_admin_pipeline():
                             else:
                                 st.error(msg)
 
-                    # --- SEMI-AUTOMATED DISPATCH PANEL ---
                     phone = row.get("phone", "")
                     email = row.get("email", "")
                     portal_url = row.get("wp_page_url", f"{LIVE_DOMAIN}/?build={row['id']}")
@@ -593,14 +638,24 @@ def render_admin_pipeline():
                     with c_btn3:
                         with st.popover("🖨️ Parts Sheet"):
                             def clean_len(val):
-                                try: return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
-                                except: return "0.0"
+                                try:
+                                    return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
+                                except Exception:
+                                    return "0.0"
                             txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n====================================\nCUSTOMER  : {row.get('customer')}\nDATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\nSPOKE     : {row.get('spoke', 'None')}\nNIPPLE    : {row.get('nipple', 'None')}\n====================================\n"
-                            if f_res["exists"]: txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
-                            if r_res["exists"]: txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
+                            if f_res["exists"]: 
+                                txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
+                            if r_res["exists"]: 
+                                txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
                             txt += f"===================================="
                             st.code(txt, language="text")
-                            st.download_button(label="📥 Download Parts Sheet", data=txt, file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", mime="text/plain", use_container_width=True)
+                            st.download_button(
+                                label="📥 Download Parts Sheet", 
+                                data=txt, 
+                                file_name=f"parts_sheet_{str(row.get('customer')).replace(' ', '_')}.txt", 
+                                mime="text/plain", 
+                                use_container_width=True
+                            )
 
             st.divider()
             with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
@@ -611,26 +666,30 @@ def render_admin_pipeline():
                             r_weight_snap = safe_int(row.get("r_weight", 0))
                             
                             f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
-                            if f_weight_snap == 0 and f_res["exists"]: f_weight_snap = safe_int(f_res["total"])
-                            if r_weight_snap == 0 and r_res["exists"]: r_weight_snap = safe_int(r_res["total"])
+                            if f_weight_snap == 0 and f_res["exists"]: 
+                                f_weight_snap = safe_int(f_res["total"])
+                            if r_weight_snap == 0 and r_res["exists"]: 
+                                r_weight_snap = safe_int(r_res["total"])
                                 
                             c_spec1, c_spec2, c_spec3 = st.columns(3)
                             with c_spec1:
                                 st.markdown("**🔘 FRONT CONFIGURATION**")
-                                if f_res["exists"] or row.get('f_rim') != "None":
+                                if f_res["exists"] or str(row.get('f_rim')).lower() != "none":
                                     st.markdown(f"- **Rim:** {row.get('f_rim')}")
                                     st.markdown(f"- **Hub:** {row.get('f_hub')}")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
                                     st.metric("Verified Front Weight", f"{f_weight_snap}g")
-                                else: st.caption("None Configured")
+                                else: 
+                                    st.caption("None Configured")
                             with c_spec2:
                                 st.markdown("**🔘 REAR CONFIGURATION**")
-                                if r_res["exists"] or row.get('r_rim') != "None":
+                                if r_res["exists"] or str(row.get('r_rim')).lower() != "none":
                                     st.markdown(f"- **Rim:** {row.get('r_rim')}")
                                     st.markdown(f"- **Hub:** {row.get('r_hub')}")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
                                     st.metric("Verified Rear Weight", f"{r_weight_snap}g")
-                                else: st.caption("None Configured")
+                                else: 
+                                    st.caption("None Configured")
                             with c_spec3:
                                 st.markdown("**📦 SYSTEM TOTALS**")
                                 st.markdown(f"- **Spoke Model:** {row.get('spoke')}")
@@ -648,8 +707,11 @@ def render_admin_pipeline():
                                     st.code(client_msg, language="text")
                             with c_arch2:
                                 if st.button("Re-open Build", key=f"re_{row['id']}", use_container_width=True):
-                                    safe_airtable_update("builds", row['id'], {"status": "Building"})
-                                    refresh_api(); st.rerun()
+                                    success, msg = safe_airtable_update("builds", row['id'], {"status": "Building"})
+                                    if success:
+                                        update_local_record("builds", row['id'], {"status": "Building"})
+                                        st.toast("Build re-opened!")
+                                        st.rerun()
 
     # -------------------------------------------------------------------------
     # TAB 1: PROVEN RECIPES
@@ -659,8 +721,10 @@ def render_admin_pipeline():
         df_rec_tab = st.session_state.data["spoke_db"]
         if not df_rec_tab.empty:
             r_search = st.text_input("🔍 Search Recipes", key="recipe_search")
-            if r_search: df_rec_tab = df_rec_tab[df_rec_tab['label'].str.contains(r_search, case=False, na=False)]
-            st.dataframe(df_rec_tab[['label', 'len_l', 'len_r', 'build_count']].sort_values('label'), use_container_width=True, hide_index=True)
+            if r_search: 
+                df_rec_tab = df_rec_tab[df_rec_tab['label'].astype(str).str.contains(r_search, case=False, na=False)]
+            cols_to_show = [c for c in ['label', 'len_l', 'len_r', 'build_count'] if c in df_rec_tab.columns]
+            st.dataframe(df_rec_tab[cols_to_show].sort_values('label'), use_container_width=True, hide_index=True)
 
     # -------------------------------------------------------------------------
     # TAB 2: REGISTER NEW BUILD
@@ -669,32 +733,40 @@ def render_admin_pipeline():
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
-        rim_opts = ["None"] + sorted(st.session_state.data["rims"]['label'].tolist(), key=str.lower)
-        hub_opts = ["None"] + sorted(st.session_state.data["hubs"]['label'].tolist(), key=str.lower)
-        spoke_opts = ["None"] + sorted(st.session_state.data["spokes"]['label'].tolist(), key=str.lower)
-        nipple_opts = ["None"] + sorted(st.session_state.data["nipples"]['label'].tolist(), key=str.lower)
+        
+        rim_opts = ["None"] + sorted([str(x) for x in st.session_state.data["rims"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["rims"].columns else ["None"]
+        hub_opts = ["None"] + sorted([str(x) for x in st.session_state.data["hubs"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["hubs"].columns else ["None"]
+        spoke_opts = ["None"] + sorted([str(x) for x in st.session_state.data["spokes"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["spokes"].columns else ["None"]
+        nipple_opts = ["None"] + sorted([str(x) for x in st.session_state.data["nipples"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["nipples"].columns else ["None"]
 
         with st.form("reg_form_v29"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
-            with c_cust1: cust = st.text_input("Customer Name *")
-            with c_cust2: phone_input = st.text_input("Customer Phone (for WhatsApp & Portal Password) *")
-            with c_cust3: email_input = st.text_input("Customer Email")
+            with c_cust1: 
+                cust = st.text_input("Customer Name *")
+            with c_cust2: 
+                phone_input = st.text_input("Customer Phone (for WhatsApp & Portal Password) *")
+            with c_cust3: 
+                email_input = st.text_input("Customer Email")
 
             c_urls1, c_urls2 = st.columns(2)
-            with c_urls1: inv = st.text_input("Invoice URL")
-            with c_urls2: gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
+            with c_urls1: 
+                inv = st.text_input("Invoice URL")
+            with c_urls2: 
+                gal_reg = st.text_input("OneDrive Gallery URL (Optional)")
 
             c_f, c_r = st.columns(2)
             with c_f:
                 st.subheader("Front Wheel")
                 fr_rim = st.selectbox("Rim", rim_opts, key="reg_fr")
                 fr_hub = st.selectbox("Hub", hub_opts, key="reg_fh")
-                fl_len, fr_len = st.number_input("Left (mm)", step=0.1), st.number_input("Right (mm)", step=0.1)
+                fl_len = st.number_input("Left (mm)", step=0.1)
+                fr_len = st.number_input("Right (mm)", step=0.1)
             with c_r:
                 st.subheader("Rear Wheel")
                 rr_rim = st.selectbox("Rim ", rim_opts, key="reg_rr")
                 rr_hub = st.selectbox("Hub ", hub_opts, key="reg_rh")
-                rl_len, rr_len = st.number_input("Left (mm) ", step=0.1), st.number_input("Right (mm) ", step=0.1)
+                rl_len = st.number_input("Left (mm) ", step=0.1)
+                rr_len = st.number_input("Right (mm) ", step=0.1)
             spk = st.selectbox("Spoke Model", spoke_opts)
             nip = st.selectbox("Nipple Model", nipple_opts)
             notes = st.text_area("Build Notes")
@@ -727,33 +799,60 @@ def render_admin_pipeline():
                     }
                     
                     try:
+                        # 1 API Call to create build record
                         new_rec = base.table("builds").create(payload)
                         rec_id = new_rec["id"]
                         
                         wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
+                        payload["id"] = rec_id
+                        payload["wp_page_url"] = wp_link
+                        
+                        # 1 Update call to link page URL
                         safe_airtable_update("builds", rec_id, {"wp_page_url": wp_link})
+                        
+                        # Append directly to local memory (0 read API calls)
+                        add_local_record("builds", payload)
 
+                        # Process spoke recipes locally using pandas (0 read API calls!)
                         db_table = base.table("spoke_db")
                         df_rims = st.session_state.data["rims"]
                         df_hubs = st.session_state.data["hubs"]
+                        df_spoke_db = st.session_state.data["spoke_db"]
+
                         for r, h, l, rr in [(fr_rim, fr_hub, fl_len, fr_len), (rr_rim, rr_hub, rl_len, rr_len)]:
                             if r != "None" and h != "None" and l > 0:
-                                matched_rim = df_rims[df_rims['label'] == r]
-                                matched_hub = df_hubs[df_hubs['label'] == h]
+                                matched_rim = df_rims[df_rims['label'] == r] if 'label' in df_rims.columns else pd.DataFrame()
+                                matched_hub = df_hubs[df_hubs['label'] == h] if 'label' in df_hubs.columns else pd.DataFrame()
                                 
                                 if not matched_rim.empty and not matched_hub.empty:
                                     rd_id = matched_rim['id'].values[0]
                                     hd_id = matched_hub['id'].values[0]
-                                    fp = f"{r} | {h}".replace("'", "\\'")
-                                    exist = db_table.all(formula=f"{{combo_id}}='{fp}'")
-                                    if exist: db_table.update(exist[0]['id'], {"build_count": exist[0]['fields'].get('build_count', 1) + 1, "len_l": l, "len_r": rr})
-                                    else: db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
-                        
-                        refresh_api()
+                                    fp = f"{r} | {h}"
+                                    
+                                    # Check local memory first instead of querying Airtable!
+                                    exist_match = pd.DataFrame()
+                                    if not df_spoke_db.empty and 'label' in df_spoke_db.columns:
+                                        exist_match = df_spoke_db[df_spoke_db['label'].astype(str).str.strip().str.lower() == fp.strip().lower()]
+
+                                    if not exist_match.empty:
+                                        recipe_row = exist_match.iloc[0]
+                                        new_count = safe_int(recipe_row.get('build_count', 1)) + 1
+                                        db_table.update(recipe_row['id'], {"build_count": new_count, "len_l": l, "len_r": rr})
+                                        update_local_record("spoke_db", recipe_row['id'], {"build_count": new_count, "len_l": l, "len_r": rr})
+                                    else:
+                                        new_rec_spk = db_table.create({"rim": [rd_id], "hub": [hd_id], "len_l": l, "len_r": rr, "build_count": 1})
+                                        add_local_record("spoke_db", {
+                                            "id": new_rec_spk["id"],
+                                            "label": fp,
+                                            "len_l": l,
+                                            "len_r": rr,
+                                            "build_count": 1
+                                        })
+
                         st.success("✅ Build Registered & Client Self-Service Portal Activated!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Failed to create build record. Please check that Airtable columns 'phone', 'email', 'wp_page_password', and 'wp_page_url' exist in your base. Error: {e}")
+                        st.error(f"❌ Failed to create build record. Error: {e}")
 
     # -------------------------------------------------------------------------
     # TAB 3: LIBRARY MANAGEMENT
@@ -766,16 +865,42 @@ def render_admin_pipeline():
                 name = st.text_input("Name")
                 c1, c2 = st.columns(2)
                 p = {}
-                if cat == "Rim": p = {"rim": name, "erd": c1.number_input("ERD"), "holes": c2.number_input("Holes", value=28), "weight": st.number_input("Weight")}
-                elif cat == "Hub": p = {"hub": name, "fd_l": c1.number_input("FD-L"), "fd_r": c2.number_input("FD-R"), "os_l": c1.number_input("OS-L"), "os_r": c2.number_input("OS-R"), "weight": st.number_input("Weight")}
-                else: p = {cat.lower(): name, "weight": st.number_input("Weight (g)", format="%.3f")}
+                if cat == "Rim":
+                    p = {
+                        "rim": name, 
+                        "erd": c1.number_input("ERD"), 
+                        "holes": c2.number_input("Holes", value=28), 
+                        "weight": st.number_input("Weight")
+                    }
+                elif cat == "Hub":
+                    p = {
+                        "hub": name, 
+                        "fd_l": c1.number_input("FD-L"), 
+                        "fd_r": c2.number_input("FD-R"), 
+                        "os_l": c1.number_input("OS-L"), 
+                        "os_r": c2.number_input("OS-R"), 
+                        "weight": st.number_input("Weight")
+                    }
+                else:
+                    p = {
+                        cat.lower(): name, 
+                        "weight": st.number_input("Weight (g)", format="%.3f")
+                    }
+                
                 if st.form_submit_button("Save to Database"):
                     if name: 
-                        base.table(f"{cat.lower()}s").create(p)
-                        refresh_api(); st.success("Added!"); st.rerun()
+                        table_key = f"{cat.lower()}s"
+                        new_rec = base.table(table_key).create(p)
+                        p["id"] = new_rec["id"]
+                        p["label"] = name
+                        add_local_record(table_key, p)
+                        st.success("Added to library!")
+                        st.rerun()
+
         v_cat = st.radio("View Inventory:", ["rims", "hubs", "spokes", "nipples"], horizontal=True)
-        df_lib = st.session_state.data[v_cat]
-        if not df_lib.empty: st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
+        df_lib = st.session_state.data.get(v_cat, pd.DataFrame())
+        if not df_lib.empty: 
+            st.dataframe(df_lib.drop(columns=['id', 'label'], errors='ignore').sort_values(df_lib.columns[0]), use_container_width=True, hide_index=True)
 
 # =========================================================================
 # --- 5. MODERN SYSTEM ROUTING DISPATCHER ---
