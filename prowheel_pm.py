@@ -275,7 +275,6 @@ def compute_workshop_analytics(bundle, completed_only=False):
 
     for _, row in df_builds.iterrows():
         b_date = str(row.get('date', '')).strip()
-        # Parse Month cleanly without defaulting unpopulated dates to current month
         if b_date and b_date.lower() not in ["none", "nan", ""] and len(b_date) >= 7 and b_date[:4].isdigit():
             month_str = b_date[:7]
         else:
@@ -344,7 +343,6 @@ def compute_workshop_analytics(bundle, completed_only=False):
 
 def render_client_portal():
     """Client View Module: Zero API Calls when reading from cached bundle."""
-    # --- BLACK BRANDING THEME INJECTION ---
     st.markdown("""
         <style>
         .block-container {
@@ -381,7 +379,6 @@ def render_client_portal():
         st.error("❌ No build specified.")
         return
 
-    # Use session state or cached bundle (0 API calls!)
     bundle = st.session_state.get('data', fetch_master_bundle())
     df_builds = bundle.get("builds", pd.DataFrame())
 
@@ -389,7 +386,6 @@ def render_client_portal():
     if not df_builds.empty and target_build_id in df_builds['id'].values:
         row = df_builds[df_builds['id'] == target_build_id].iloc[0].to_dict()
     else:
-        # Fallback to single record fetch if missing from memory
         try:
             record = base.table("builds").get(target_build_id)
             row = record.get("fields", {})
@@ -398,7 +394,6 @@ def render_client_portal():
             st.error("❌ Invalid or expired build link reference.")
             return
 
-    # --- BRAND LOGO & HEADER ROW ---
     col_logo, col_title = st.columns([1, 4], vertical_alignment="center")
     with col_logo:
         try:
@@ -445,7 +440,6 @@ def render_client_portal():
 
     current_status = row.get("status", "Order Received")
     
-    # --- LIVE PROGRESS STEPPER ---
     st.markdown("### 📊 Live Build Progress")
     current_idx = STATUS_STAGES.index(current_status) if current_status in STATUS_STAGES else 0
     
@@ -467,7 +461,7 @@ def render_client_portal():
 
     st.divider()
 
-    # --- DYNAMIC WEIGHT COMPUTATION ENGINE ---
+    # DYNAMIC WEIGHT COMPUTATION
     f_res, r_res = calculate_wheel_weights(row, bundle)
 
     f_weight_snap = safe_int(row.get("f_weight", 0))
@@ -572,6 +566,12 @@ def render_admin_pipeline():
     
     tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📊 Trends", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
+    # Extract dynamic component selection lists from master inventory bundle
+    rim_opts = ["None"] + sorted([str(x) for x in st.session_state.data["rims"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["rims"].columns else ["None"]
+    hub_opts = ["None"] + sorted([str(x) for x in st.session_state.data["hubs"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["hubs"].columns else ["None"]
+    spoke_opts = ["None"] + sorted([str(x) for x in st.session_state.data["spokes"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["spokes"].columns else ["None"]
+    nipple_opts = ["None"] + sorted([str(x) for x in st.session_state.data["nipples"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["nipples"].columns else ["None"]
+
     # -------------------------------------------------------------------------
     # TAB 0: WORKSHOP PIPELINE
     # -------------------------------------------------------------------------
@@ -658,7 +658,6 @@ def render_admin_pipeline():
                                     "r_weight": r_wt_snap
                                 })
                             
-                            # 1 Update API Call + 0 Read API Calls (Mutate local memory)
                             success, msg = safe_airtable_update("builds", row['id'], updates)
                             if success:
                                 update_local_record("builds", row['id'], updates)
@@ -706,7 +705,7 @@ def render_admin_pipeline():
                                 mailto_url = f"mailto:{email}?subject={subject}&body={body}"
                                 st.link_button("✉️ Send Email", mailto_url, use_container_width=True)
 
-                    c_btn1, c_btn2, c_btn3 = st.columns(3)
+                    c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
                     with c_btn1:
                         with st.popover("📝 Details"):
                             fs = st.text_input("Front Serial", value=row.get('f_rim_serial', ''), key=f"fs_{row['id']}")
@@ -770,6 +769,62 @@ def render_admin_pipeline():
                                 mime="text/plain", 
                                 use_container_width=True
                             )
+                    with c_btn4:
+                        # =========================================================
+                        # DYNAMIC COMPONENT MODIFICATION POPOVER
+                        # =========================================================
+                        with st.popover("🔧 Edit Components"):
+                            st.markdown("#### Modify Build Components")
+                            
+                            f_rim_cur = str(row.get('f_rim', 'None'))
+                            f_hub_cur = str(row.get('f_hub', 'None'))
+                            r_rim_cur = str(row.get('r_rim', 'None'))
+                            r_hub_cur = str(row.get('r_hub', 'None'))
+                            spk_cur   = str(row.get('spoke', 'None'))
+                            nip_cur   = str(row.get('nipple', 'None'))
+
+                            st.markdown("**Front Wheel**")
+                            e_fr_rim = st.selectbox("Front Rim", rim_opts, index=rim_opts.index(f_rim_cur) if f_rim_cur in rim_opts else 0, key=f"e_fr_{row['id']}")
+                            e_fr_hub = st.selectbox("Front Hub", hub_opts, index=hub_opts.index(f_hub_cur) if f_hub_cur in hub_opts else 0, key=f"e_fh_{row['id']}")
+                            c_fl, c_fr = st.columns(2)
+                            e_fl_len = c_fl.number_input("Front Left (mm)", value=safe_float(row.get('f_l')), step=0.1, key=f"e_fl_{row['id']}")
+                            e_fr_len = c_fr.number_input("Front Right (mm)", value=safe_float(row.get('f_r')), step=0.1, key=f"e_fr_len_{row['id']}")
+
+                            st.divider()
+
+                            st.markdown("**Rear Wheel**")
+                            e_rr_rim = st.selectbox("Rear Rim", rim_opts, index=rim_opts.index(r_rim_cur) if r_rim_cur in rim_opts else 0, key=f"e_rr_{row['id']}")
+                            e_rr_hub = st.selectbox("Rear Hub", hub_opts, index=hub_opts.index(r_hub_cur) if r_hub_cur in hub_opts else 0, key=f"e_rh_{row['id']}")
+                            c_rl, c_rr = st.columns(2)
+                            e_rl_len = c_rl.number_input("Rear Left (mm)", value=safe_float(row.get('r_l')), step=0.1, key=f"e_rl_{row['id']}")
+                            e_rr_len = c_rr.number_input("Rear Right (mm)", value=safe_float(row.get('r_r')), step=0.1, key=f"e_rr_len_{row['id']}")
+
+                            st.divider()
+
+                            st.markdown("**Shared Components**")
+                            e_spk = st.selectbox("Spoke Model", spoke_opts, index=spoke_opts.index(spk_cur) if spk_cur in spoke_opts else 0, key=f"e_spk_{row['id']}")
+                            e_nip = st.selectbox("Nipple Model", nipple_opts, index=nipple_opts.index(nip_cur) if nip_cur in nipple_opts else 0, key=f"e_nip_{row['id']}")
+
+                            if st.button("💾 Update Components & Recalculate", key=f"save_comp_{row['id']}", use_container_width=True):
+                                comp_updates = {
+                                    "f_rim": e_fr_rim,
+                                    "f_hub": e_fr_hub,
+                                    "f_l": e_fl_len,
+                                    "f_r": e_fr_len,
+                                    "r_rim": e_rr_rim,
+                                    "r_hub": e_rr_hub,
+                                    "r_l": e_rl_len,
+                                    "r_r": e_rr_len,
+                                    "spoke": e_spk,
+                                    "nipple": e_nip
+                                }
+                                success, msg = safe_airtable_update("builds", row['id'], comp_updates)
+                                if success:
+                                    update_local_record("builds", row['id'], comp_updates)
+                                    st.toast("⚡ Build components and weights recalculated!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
 
             st.divider()
             with st.expander(f"📁 Completed Archive ({len(completed_builds)})"):
@@ -835,7 +890,6 @@ def render_admin_pipeline():
         
         df_stock = st.session_state.data.get("stock_orders", pd.DataFrame())
         
-        # Summary Metrics
         if not df_stock.empty and 'status' in df_stock.columns:
             active_stock = df_stock[~df_stock['status'].isin(["Delivered", "Cancelled"])]
             delivered_stock = df_stock[df_stock['status'] == "Delivered"]
@@ -857,7 +911,6 @@ def render_admin_pipeline():
 
         st.divider()
 
-        # Log New Stock Order Form
         with st.expander("➕ Log New Supplier Stock Order", expanded=df_stock.empty):
             with st.form("new_stock_order_form"):
                 sc1, sc2 = st.columns(2)
@@ -886,7 +939,6 @@ def render_admin_pipeline():
                             "notes": st_notes
                         }
                         try:
-                            # 1 Write API Call with typecast=True
                             new_rec = base.table("stock_orders").create(order_payload, typecast=True)
                             order_payload["id"] = new_rec["id"]
                             add_local_record("stock_orders", order_payload)
@@ -897,7 +949,6 @@ def render_admin_pipeline():
                     else:
                         st.error("Please enter a Supplier Name and Product Items.")
 
-        # Active Stock Orders Display
         if not active_stock.empty:
             st.write(f"### 📦 Pending Stock Shipments ({len(active_stock)})")
             for _, s_row in active_stock.iterrows():
@@ -922,7 +973,6 @@ def render_admin_pipeline():
                         st.markdown(f"**Order Date:** {s_row.get('order_date', 'TBD')}")
                         st.markdown(f"**Delivery ETA:** {s_eta}")
                         
-                        # Update Status
                         new_so_s = st.selectbox(
                             "Update Status", 
                             STOCK_ORDER_STAGES, 
@@ -938,21 +988,18 @@ def render_admin_pipeline():
                             else:
                                 st.error(msg)
 
-                        # Tracking Link / Info
                         if has_so_track:
                             if str(s_tracking).startswith("http"):
                                 st.link_button("🚚 Track Package", s_tracking, use_container_width=True)
                             else:
                                 st.info(f"Courier Ref: {s_tracking}")
 
-                        # Supplier Invoice Link / Info
                         if has_so_inv:
                             if str(s_invoice).startswith("http"):
                                 st.link_button("📄 View Supplier Invoice", s_invoice, use_container_width=True)
                             else:
                                 st.caption(f"📄 Invoice Ref: {s_invoice}")
 
-                        # Edit Order Details Popover
                         with st.popover("✏️ Edit Order, Invoice & Tracking"):
                             edit_eta = st.text_input("Delivery ETA (YYYY-MM-DD)", value=str(s_eta), key=f"so_eta_{s_id}")
                             edit_inv = st.text_input("Supplier Invoice URL / Ref", value=str(s_invoice) if has_so_inv else "", key=f"so_inv_{s_id}")
@@ -974,7 +1021,6 @@ def render_admin_pipeline():
                                 else:
                                     st.error(msg)
 
-        # Delivered & Archive Section
         if not delivered_stock.empty:
             st.divider()
             with st.expander(f"📁 Delivered Stock Order History ({len(delivered_stock)})"):
@@ -991,7 +1037,6 @@ def render_admin_pipeline():
     with tabs[2]:
         st.subheader("📊 Workshop Trends & Analytics Dashboard")
         
-        # Scope Filter Toggle (Completed vs All Builds)
         scope_choice = st.radio(
             "Analytics Scope:", 
             ["Completed Builds Only", "All Registered Builds (Active & Completed)"], 
@@ -1014,7 +1059,6 @@ def render_admin_pipeline():
             tot_spokes = df_spk['count'].sum() if not df_spk.empty else 0
             tot_nipples = df_nip['count'].sum() if not df_nip.empty else 0
 
-            # 1. Top Metrics Summary Row
             tm1, tm2, tm3 = st.columns(3)
             with tm1:
                 st.metric("🏆 Builds Analyzed", analytics["total_builds"])
@@ -1025,7 +1069,6 @@ def render_admin_pipeline():
 
             st.divider()
 
-            # 2. Top 10 Rims & Top 10 Hubs Charts
             c_rim_col, c_hub_col = st.columns(2)
             with c_rim_col:
                 st.markdown("### 🔘 Top 10 Rims to Date")
@@ -1049,7 +1092,6 @@ def render_admin_pipeline():
 
             st.divider()
 
-            # 3. Spokes Consumption Analytics
             st.markdown("### 📏 Spoke Volume Analytics")
             spk_col1, spk_col2 = st.columns(2)
             
@@ -1082,7 +1124,6 @@ def render_admin_pipeline():
 
             st.divider()
 
-            # 4. Nipples Consumption Analytics
             st.markdown("### 🔩 Nipple Volume Analytics")
             nip_col1, nip_col2 = st.columns(2)
             
@@ -1115,7 +1156,6 @@ def render_admin_pipeline():
 
             st.divider()
 
-            # 5. Interactive Build-by-Build Audit & Verification Tool
             with st.expander("🔎 Audit & Verification: Inspect Individual Build Calculations", expanded=True):
                 st.markdown("Select a month to inspect the exact builds and spoke/nipple counts calculated by the system:")
                 
@@ -1185,11 +1225,6 @@ def render_admin_pipeline():
         st.header("📝 Register New Build")
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
-        
-        rim_opts = ["None"] + sorted([str(x) for x in st.session_state.data["rims"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["rims"].columns else ["None"]
-        hub_opts = ["None"] + sorted([str(x) for x in st.session_state.data["hubs"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["hubs"].columns else ["None"]
-        spoke_opts = ["None"] + sorted([str(x) for x in st.session_state.data["spokes"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["spokes"].columns else ["None"]
-        nipple_opts = ["None"] + sorted([str(x) for x in st.session_state.data["nipples"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["nipples"].columns else ["None"]
 
         with st.form("reg_form_v29"):
             c_cust1, c_cust2, c_cust3 = st.columns(3)
@@ -1251,7 +1286,6 @@ def render_admin_pipeline():
                     }
                     
                     try:
-                        # 1 API Call to create build record with typecast=True
                         new_rec = base.table("builds").create(payload, typecast=True)
                         rec_id = new_rec["id"]
                         
@@ -1259,13 +1293,9 @@ def render_admin_pipeline():
                         payload["id"] = rec_id
                         payload["wp_page_url"] = wp_link
                         
-                        # 1 Update call to link page URL
                         safe_airtable_update("builds", rec_id, {"wp_page_url": wp_link})
-                        
-                        # Append directly to local memory (0 read API calls)
                         add_local_record("builds", payload)
 
-                        # Process spoke recipes locally using pandas (0 read API calls!)
                         db_table = base.table("spoke_db")
                         df_rims = st.session_state.data["rims"]
                         df_hubs = st.session_state.data["hubs"]
@@ -1281,7 +1311,6 @@ def render_admin_pipeline():
                                     hd_id = matched_hub['id'].values[0]
                                     fp = f"{r} | {h}"
                                     
-                                    # Check local memory first instead of querying Airtable!
                                     exist_match = pd.DataFrame()
                                     if not df_spoke_db.empty and 'label' in df_spoke_db.columns:
                                         exist_match = df_spoke_db[df_spoke_db['label'].astype(str).str.strip().str.lower() == fp.strip().lower()]
