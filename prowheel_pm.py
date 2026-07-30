@@ -105,38 +105,50 @@ def get_comp_data_from_bundle(bundle, table_key, label):
     return {}
 
 def calculate_wheel_weights(row, bundle):
-    """Calculates weights dynamically using defensive type-safe parsing engines."""
+    """Calculates weights dynamically using explicit build spoke counts or rim database defaults."""
     spk_data = get_comp_data_from_bundle(bundle, "spokes", row.get('spoke'))
     nip_data = get_comp_data_from_bundle(bundle, "nipples", row.get('nipple'))
     
     u_spk = safe_float(spk_data.get('weight', 0))
     u_nip = safe_float(nip_data.get('weight', 0))
 
-    f_res = {"total": 0.0, "exists": False}
+    f_res = {"total": 0.0, "exists": False, "spoke_count": 0}
     if row.get('f_rim') and str(row.get('f_rim')).lower().strip() != "none":
         frd = get_comp_data_from_bundle(bundle, "rims", row.get('f_rim'))
         fhd = get_comp_data_from_bundle(bundle, "hubs", row.get('f_hub'))
-        h = int(safe_float(frd.get('holes', 0)))
-        if h == 0:
-            h = 28  # Fallback default spoke count if unspecified
+        
+        # Priority: Build record explicit count -> Rim table count -> Fallback 28
+        h = safe_int(row.get('f_holes'))
+        if h <= 0:
+            h = safe_int(frd.get('holes', 0))
+        if h <= 0:
+            h = 28
+            
         f_res.update({
             "exists": True, 
             "rim_w": safe_float(frd.get('weight', 0)), 
-            "hub_w": safe_float(fhd.get('weight', 0))
+            "hub_w": safe_float(fhd.get('weight', 0)),
+            "spoke_count": h
         })
         f_res["total"] = f_res["rim_w"] + f_res["hub_w"] + (h * (u_spk + u_nip))
 
-    r_res = {"total": 0.0, "exists": False}
+    r_res = {"total": 0.0, "exists": False, "spoke_count": 0}
     if row.get('r_rim') and str(row.get('r_rim')).lower().strip() != "none":
         rrd = get_comp_data_from_bundle(bundle, "rims", row.get('r_rim'))
         rhd = get_comp_data_from_bundle(bundle, "hubs", row.get('r_hub'))
-        h = int(safe_float(rrd.get('holes', 0)))
-        if h == 0:
-            h = 28  # Fallback default spoke count if unspecified
+        
+        # Priority: Build record explicit count -> Rim table count -> Fallback 28
+        h = safe_int(row.get('r_holes'))
+        if h <= 0:
+            h = safe_int(rrd.get('holes', 0))
+        if h <= 0:
+            h = 28
+            
         r_res.update({
             "exists": True, 
             "rim_w": safe_float(rrd.get('weight', 0)), 
-            "hub_w": safe_float(rhd.get('weight', 0))
+            "hub_w": safe_float(rhd.get('weight', 0)),
+            "spoke_count": h
         })
         r_res["total"] = r_res["rim_w"] + r_res["hub_w"] + (h * (u_spk + u_nip))
         
@@ -265,7 +277,7 @@ def compute_workshop_analytics(bundle, completed_only=False):
         for _, r_row in df_rims.iterrows():
             lbl = str(r_row.get('label', '')).strip().lower()
             if lbl:
-                rim_holes_map[lbl] = int(safe_float(r_row.get('holes', 28)))
+                rim_holes_map[lbl] = safe_int(r_row.get('holes', 28))
 
     all_rims = []
     all_hubs = []
@@ -299,7 +311,9 @@ def compute_workshop_analytics(bundle, completed_only=False):
             if f_hub and f_hub.lower() != "none":
                 all_hubs.append(f_hub)
             
-            f_holes = rim_holes_map.get(f_rim.lower(), 28)
+            f_holes = safe_int(row.get('f_holes'))
+            if f_holes <= 0:
+                f_holes = rim_holes_map.get(f_rim.lower(), 28)
             if f_holes <= 0 or f_holes > 48:
                 f_holes = 28
             
@@ -313,7 +327,9 @@ def compute_workshop_analytics(bundle, completed_only=False):
             if r_hub and r_hub.lower() != "none":
                 all_hubs.append(r_hub)
             
-            r_holes = rim_holes_map.get(r_rim.lower(), 28)
+            r_holes = safe_int(row.get('r_holes'))
+            if r_holes <= 0:
+                r_holes = rim_holes_map.get(r_rim.lower(), 28)
             if r_holes <= 0 or r_holes > 48:
                 r_holes = 28
             
@@ -461,7 +477,7 @@ def render_client_portal():
 
     st.divider()
 
-    # DYNAMIC WEIGHT COMPUTATION
+    # DYNAMIC WEIGHT COMPUTATION ENGINE
     f_res, r_res = calculate_wheel_weights(row, bundle)
 
     f_weight_snap = safe_int(row.get("f_weight", 0))
@@ -484,6 +500,7 @@ def render_client_portal():
             st.markdown("### 🔘 Front Wheel Configuration")
             st.markdown(f"- **Rim:** {row.get('f_rim')}")
             st.markdown(f"- **Hub:** {row.get('f_hub')}")
+            st.markdown(f"- **Spoke Count:** {f_res.get('spoke_count', 28)} Spokes")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
             if f_weight_disp > 0:
@@ -494,6 +511,7 @@ def render_client_portal():
             st.markdown("### 🔘 Rear Wheel Configuration")
             st.markdown(f"- **Rim:** {row.get('r_rim')}")
             st.markdown(f"- **Hub:** {row.get('r_hub')}")
+            st.markdown(f"- **Spoke Count:** {r_res.get('spoke_count', 28)} Spokes")
             st.markdown(f"- **Spokes:** {row.get('spoke')} `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
             st.markdown(f"- **Nipples:** {row.get('nipple')}")
             if r_weight_disp > 0:
@@ -611,7 +629,7 @@ def render_admin_pipeline():
                         st.markdown("**🔘 FRONT**")
                         if f_res["exists"]:
                             st.markdown(f"**{row.get('f_rim')}**")
-                            st.caption(f"{row.get('f_hub')}")
+                            st.caption(f"{row.get('f_hub')} ({f_res['spoke_count']}H)")
                             st.info(f"📏 L: {row.get('f_l')} / R: {row.get('f_r')} mm")
                             st.metric("Est Weight", f"{safe_int(f_res['total'])}g")
                         else:
@@ -620,7 +638,7 @@ def render_admin_pipeline():
                         st.markdown("**🔘 REAR**")
                         if r_res["exists"]:
                             st.markdown(f"**{row.get('r_rim')}**")
-                            st.caption(f"{row.get('r_hub')}")
+                            st.caption(f"{row.get('r_hub')} ({r_res['spoke_count']}H)")
                             st.success(f"📏 L: {row.get('r_l')} / R: {row.get('r_r')} mm")
                             st.metric("Est Weight", f"{safe_int(r_res['total'])}g")
                         else:
@@ -757,9 +775,9 @@ def render_admin_pipeline():
                                     return "0.0"
                             txt = f"🚲 WHEELBUILDER LAB SPEC SHEET\n====================================\nCUSTOMER  : {row.get('customer')}\nDATE      : {row.get('date', datetime.now().strftime('%Y-%m-%d'))}\nSPOKE     : {row.get('spoke', 'None')}\nNIPPLE    : {row.get('nipple', 'None')}\n====================================\n"
                             if f_res["exists"]: 
-                                txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
+                                txt += f"\n🔘 FRONT WHEEL CONFIGURATION\n  - Rim: {row.get('f_rim')}\n  - Hub: {row.get('f_hub')}\n  - Spoke Count: {f_res['spoke_count']}\n  - Left Spokes  : {clean_len(row.get('f_l'))} mm\n  - Right Spokes : {clean_len(row.get('f_r'))} mm\n"
                             if r_res["exists"]: 
-                                txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
+                                txt += f"\n🔘 REAR WHEEL CONFIGURATION\n  - Rim: {row.get('r_rim')}\n  - Hub: {row.get('r_hub')}\n  - Spoke Count: {r_res['spoke_count']}\n  - Left Spokes  : {clean_len(row.get('r_l'))} mm\n  - Right Spokes : {clean_len(row.get('r_r'))} mm\n"
                             txt += f"===================================="
                             st.code(txt, language="text")
                             st.download_button(
@@ -783,9 +801,17 @@ def render_admin_pipeline():
                             spk_cur   = str(row.get('spoke', 'None'))
                             nip_cur   = str(row.get('nipple', 'None'))
 
+                            # Calculate sensible spoke count defaults from rim database if row is unassigned
+                            frd_def = safe_int(get_comp_data_from_bundle(st.session_state.data, "rims", f_rim_cur).get('holes', 28))
+                            rrd_def = safe_int(get_comp_data_from_bundle(st.session_state.data, "rims", r_rim_cur).get('holes', 28))
+
+                            def_f_holes = safe_int(row.get('f_holes')) if safe_int(row.get('f_holes')) > 0 else (frd_def if frd_def > 0 else 28)
+                            def_r_holes = safe_int(row.get('r_holes')) if safe_int(row.get('r_holes')) > 0 else (rrd_def if rrd_def > 0 else 28)
+
                             st.markdown("**Front Wheel**")
                             e_fr_rim = st.selectbox("Front Rim", rim_opts, index=rim_opts.index(f_rim_cur) if f_rim_cur in rim_opts else 0, key=f"e_fr_{row['id']}")
                             e_fr_hub = st.selectbox("Front Hub", hub_opts, index=hub_opts.index(f_hub_cur) if f_hub_cur in hub_opts else 0, key=f"e_fh_{row['id']}")
+                            e_fr_holes = st.number_input("Front Spoke Count (Holes)", value=def_f_holes, step=1, min_value=0, max_value=72, key=f"e_fr_h_{row['id']}")
                             c_fl, c_fr = st.columns(2)
                             e_fl_len = c_fl.number_input("Front Left (mm)", value=safe_float(row.get('f_l')), step=0.1, key=f"e_fl_{row['id']}")
                             e_fr_len = c_fr.number_input("Front Right (mm)", value=safe_float(row.get('f_r')), step=0.1, key=f"e_fr_len_{row['id']}")
@@ -795,6 +821,7 @@ def render_admin_pipeline():
                             st.markdown("**Rear Wheel**")
                             e_rr_rim = st.selectbox("Rear Rim", rim_opts, index=rim_opts.index(r_rim_cur) if r_rim_cur in rim_opts else 0, key=f"e_rr_{row['id']}")
                             e_rr_hub = st.selectbox("Rear Hub", hub_opts, index=hub_opts.index(r_hub_cur) if r_hub_cur in hub_opts else 0, key=f"e_rh_{row['id']}")
+                            e_rr_holes = st.number_input("Rear Spoke Count (Holes)", value=def_r_holes, step=1, min_value=0, max_value=72, key=f"e_rr_h_{row['id']}")
                             c_rl, c_rr = st.columns(2)
                             e_rl_len = c_rl.number_input("Rear Left (mm)", value=safe_float(row.get('r_l')), step=0.1, key=f"e_rl_{row['id']}")
                             e_rr_len = c_rr.number_input("Rear Right (mm)", value=safe_float(row.get('r_r')), step=0.1, key=f"e_rr_len_{row['id']}")
@@ -809,10 +836,12 @@ def render_admin_pipeline():
                                 comp_updates = {
                                     "f_rim": e_fr_rim,
                                     "f_hub": e_fr_hub,
+                                    "f_holes": e_fr_holes,
                                     "f_l": e_fl_len,
                                     "f_r": e_fr_len,
                                     "r_rim": e_rr_rim,
                                     "r_hub": e_rr_hub,
+                                    "r_holes": e_rr_holes,
                                     "r_l": e_rl_len,
                                     "r_r": e_rr_len,
                                     "spoke": e_spk,
@@ -821,7 +850,7 @@ def render_admin_pipeline():
                                 success, msg = safe_airtable_update("builds", row['id'], comp_updates)
                                 if success:
                                     update_local_record("builds", row['id'], comp_updates)
-                                    st.toast("⚡ Build components and weights recalculated!")
+                                    st.toast("⚡ Build components, spoke counts & weights updated!")
                                     st.rerun()
                                 else:
                                     st.error(msg)
@@ -846,6 +875,7 @@ def render_admin_pipeline():
                                 if f_res["exists"] or str(row.get('f_rim')).lower() != "none":
                                     st.markdown(f"- **Rim:** {row.get('f_rim')}")
                                     st.markdown(f"- **Hub:** {row.get('f_hub')}")
+                                    st.markdown(f"- **Spoke Count:** {f_res.get('spoke_count', 28)} Spokes")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('f_l')}mm / Right: {row.get('f_r')}mm`")
                                     st.metric("Verified Front Weight", f"{f_weight_snap}g")
                                 else: 
@@ -855,6 +885,7 @@ def render_admin_pipeline():
                                 if r_res["exists"] or str(row.get('r_rim')).lower() != "none":
                                     st.markdown(f"- **Rim:** {row.get('r_rim')}")
                                     st.markdown(f"- **Hub:** {row.get('r_hub')}")
+                                    st.markdown(f"- **Spoke Count:** {r_res.get('spoke_count', 28)} Spokes")
                                     st.markdown(f"- **Spokes:** `Left: {row.get('r_l')}mm / Right: {row.get('r_r')}mm`")
                                     st.metric("Verified Rear Weight", f"{r_weight_snap}g")
                                 else: 
@@ -1172,11 +1203,15 @@ def render_admin_pipeline():
                             f_rim = str(b_row.get('f_rim', '')).strip()
                             r_rim = str(b_row.get('r_rim', '')).strip()
                             
-                            f_cnt = rim_holes_map.get(f_rim.lower(), 28) if (f_rim and f_rim.lower() != "none") else 0
-                            r_cnt = rim_holes_map.get(r_rim.lower(), 28) if (r_rim and r_rim.lower() != "none") else 0
-                            
+                            f_cnt = safe_int(b_row.get('f_holes'))
+                            if f_cnt <= 0:
+                                f_cnt = rim_holes_map.get(f_rim.lower(), 28) if (f_rim and f_rim.lower() != "none") else 0
                             if f_cnt <= 0 or f_cnt > 48:
                                 f_cnt = 28
+
+                            r_cnt = safe_int(b_row.get('r_holes'))
+                            if r_cnt <= 0:
+                                r_cnt = rim_holes_map.get(r_rim.lower(), 28) if (r_rim and r_rim.lower() != "none") else 0
                             if r_cnt <= 0 or r_cnt > 48:
                                 r_cnt = 28
                                 
@@ -1246,12 +1281,14 @@ def render_admin_pipeline():
                 st.subheader("Front Wheel")
                 fr_rim = st.selectbox("Rim", rim_opts, key="reg_fr")
                 fr_hub = st.selectbox("Hub", hub_opts, key="reg_fh")
+                fr_holes = st.number_input("Front Spoke Count (Holes)", value=28, step=1, min_value=0, max_value=72, key="reg_fh_cnt")
                 fl_len = st.number_input("Left (mm)", step=0.1)
                 fr_len = st.number_input("Right (mm)", step=0.1)
             with c_r:
                 st.subheader("Rear Wheel")
                 rr_rim = st.selectbox("Rim ", rim_opts, key="reg_rr")
                 rr_hub = st.selectbox("Hub ", hub_opts, key="reg_rh")
+                rr_holes = st.number_input("Rear Spoke Count (Holes)", value=28, step=1, min_value=0, max_value=72, key="reg_rh_cnt")
                 rl_len = st.number_input("Left (mm) ", step=0.1)
                 rr_len = st.number_input("Right (mm) ", step=0.1)
             spk = st.selectbox("Spoke Model", spoke_opts)
@@ -1274,10 +1311,12 @@ def render_admin_pipeline():
                         "gallery_url": gal_reg, 
                         "f_rim": fr_rim, 
                         "f_hub": fr_hub, 
+                        "f_holes": fr_holes,
                         "f_l": fl_len, 
                         "f_r": fr_len, 
                         "r_rim": rr_rim, 
                         "r_hub": rr_hub, 
+                        "r_holes": rr_holes,
                         "r_l": rl_len, 
                         "r_r": rr_len, 
                         "spoke": spk, 
