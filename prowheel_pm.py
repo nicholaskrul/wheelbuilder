@@ -5,12 +5,13 @@ import secrets
 import string
 import math
 import urllib.parse
+import requests
 from datetime import datetime, timedelta
 from pyairtable import Api
 from PIL import Image
 
 # =========================================================================
-# --- 1. GLOBAL WORKSHOP CONFIGURATIONS (YOUR CONTROL PANEL) ---
+# --- 1. GLOBAL WORKSHOP CONFIGURATIONS ---
 # =========================================================================
 try:
     _page_icon = Image.open("WB_logo.png")
@@ -27,7 +28,7 @@ STATUS_STAGES = ["Order Received", "Parts Received", "Building", "Complete"]
 STOCK_ORDER_STAGES = ["Ordered", "Shipped", "Delivered", "Cancelled"]
 
 # =========================================================================
-# --- 2. AIRTABLE CONNECTION ENGINE ---
+# --- 2. AIRTABLE & ZOHO CONNECTION ENGINES ---
 # =========================================================================
 try:
     API_KEY = st.secrets["airtable"]["api_key"]
@@ -37,6 +38,66 @@ try:
 except Exception:
     st.error("❌ Airtable Connection Error: Check your Streamlit Secrets.")
     st.stop()
+
+class ZohoBooksEngine:
+    """Handles authentication and data fetching from the Zoho Books API."""
+    
+    def __init__(self):
+        try:
+            self.client_id = st.secrets["zoho"]["client_id"]
+            self.client_secret = st.secrets["zoho"]["client_secret"]
+            self.refresh_token = st.secrets["zoho"]["refresh_token"]
+            self.org_id = st.secrets["zoho"]["organization_id"]
+            self.domain = st.secrets.get("zoho", {}).get("domain", "com")
+            
+            self.accounts_url = f"https://accounts.zoho.{self.domain}/oauth/v2/token"
+            self.api_base_url = f"https://www.zohoapis.{self.domain}/books/v3"
+        except Exception:
+            self.client_id = None
+
+    def get_access_token(self):
+        """Exchanges the refresh token for a short-lived access token."""
+        if not self.client_id:
+            return None
+        params = {
+            "refresh_token": self.refresh_token,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "refresh_token"
+        }
+        try:
+            response = requests.post(self.accounts_url, params=params)
+            data = response.json()
+            return data.get("access_token")
+        except Exception as e:
+            st.error(f"❌ Zoho Auth Network Error: {e}")
+            return None
+
+    def fetch_invoices(self):
+        """Retrieves only invoices created today from Zoho Books."""
+        token = self.get_access_token()
+        if not token:
+            return []
+
+        headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        params = {
+            "organization_id": self.org_id,
+            "sort_column": "created_time",
+            "sort_order": "D",
+            "date_start": today_str,
+            "date_end": today_str,
+            "per_page": 100
+        }
+
+        try:
+            response = requests.get(f"{self.api_base_url}/invoices", headers=headers, params=params)
+            if response.status_code == 200:
+                return response.json().get("invoices", [])
+        except Exception:
+            pass
+        return []
 
 # =========================================================================
 # --- 3. CORE ANALYTICS & DEFENSIVE PROGRAMMING HELPERS ---
@@ -82,15 +143,24 @@ def safe_int(val, default=0):
             return default
 
 def safe_airtable_update(table_name, record_id, updates):
-    """Safely updates Airtable records with typecasting enabled to prevent Single Select / Date field errors."""
-    try:
-        base.table(table_name).update(record_id, updates, typecast=True)
-        return True, "Updated successfully!"
-    except Exception as e:
-        err_msg = str(e)
-        if "UNKNOWN_FIELD_NAME" in err_msg or "422" in err_msg:
-            return False, f"❌ Airtable Error: Please ensure columns exist in your Airtable base! Details: {err_msg}"
-        return False, f"❌ Update Failed: {err_msg}"
+    """Safely updates Airtable records. Strips missing unknown fields automatically."""
+    updates_to_send = updates.copy()
+    while updates_to_send:
+        try:
+            base.table(table_name).update(record_id, updates_to_send, typecast=True)
+            return True, "Updated successfully!"
+        except Exception as e:
+            err_msg = str(e)
+            if "UNKNOWN_FIELD_NAME" in err_msg:
+                import re
+                match = re.search(r'Unknown field name: "([^"]+)"', err_msg)
+                if match:
+                    bad_field = match.group(1)
+                    if bad_field in updates_to_send:
+                        del updates_to_send[bad_field]
+                        continue
+            return False, f"❌ Update Failed: {err_msg}"
+    return True, "Updated with local overrides."
 
 def get_comp_data_from_bundle(bundle, table_key, label):
     if not label or str(label).lower().strip() in ["none", "nan", ""]: 
@@ -117,7 +187,6 @@ def calculate_wheel_weights(row, bundle):
         frd = get_comp_data_from_bundle(bundle, "rims", row.get('f_rim'))
         fhd = get_comp_data_from_bundle(bundle, "hubs", row.get('f_hub'))
         
-        # Priority: Build record explicit count -> Rim table count -> Fallback 28
         h = safe_int(row.get('f_holes'))
         if h <= 0:
             h = safe_int(frd.get('holes', 0))
@@ -137,7 +206,6 @@ def calculate_wheel_weights(row, bundle):
         rrd = get_comp_data_from_bundle(bundle, "rims", row.get('r_rim'))
         rhd = get_comp_data_from_bundle(bundle, "hubs", row.get('r_hub'))
         
-        # Priority: Build record explicit count -> Rim table count -> Fallback 28
         h = safe_int(row.get('r_holes'))
         if h <= 0:
             h = safe_int(rrd.get('holes', 0))
@@ -155,16 +223,14 @@ def calculate_wheel_weights(row, bundle):
     return f_res, r_res
 
 def format_clean_phone(phone_str):
-    """Cleans phone numbers for WhatsApp integration (e.g., 27821234567)."""
     if not phone_str: 
         return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
     if clean.startswith("0"):
-        clean = "27" + clean[1:]  # Default South Africa format
+        clean = "27" + clean[1:]
     return clean
 
 def format_10digit_phone(phone_str):
-    """Standardises phone numbers to a 10-digit format (e.g. 0821234567) for portal passwords."""
     if not phone_str: 
         return ""
     clean = "".join(c for c in str(phone_str) if c.isdigit())
@@ -175,7 +241,6 @@ def format_10digit_phone(phone_str):
     return clean
 
 def generate_update_message(customer_name, status, portal_url, passkey):
-    """Generates standard notification messages for clients."""
     status_emoji = {
         "Order Received": "📋",
         "Parts Received": "📦",
@@ -195,7 +260,6 @@ def generate_update_message(customer_name, status, portal_url, passkey):
 
 @st.cache_data(ttl=CACHE_DATA_TTL, show_spinner="Syncing Workshop Data...")
 def fetch_master_bundle():
-    """Fetches full bundle from Airtable and caches in memory across user sessions."""
     tables = {
         "builds": "customer", 
         "rims": "rim", 
@@ -221,7 +285,6 @@ def fetch_master_bundle():
                 data.append(fields)
             df = pd.DataFrame(data)
             for col in df.columns:
-                # Fix IndexError on empty list fields returned from Airtable
                 df[col] = df[col].apply(
                     lambda x: x[0] if (isinstance(x, list) and len(x) > 0) else (None if isinstance(x, list) else x)
                 )
@@ -230,7 +293,6 @@ def fetch_master_bundle():
             bundle[table_name] = pd.DataFrame()
     return bundle
 
-# In-Memory Local Mutations (Deduplicates records to prevent inflated count analytics)
 def update_local_record(table_name, record_id, updates):
     if 'data' not in st.session_state:
         st.session_state.data = fetch_master_bundle()
@@ -253,19 +315,75 @@ def add_local_record(table_name, record_dict):
     else:
         st.session_state.data[table_name] = pd.concat([df, new_df], ignore_index=True)
 
+def sync_zoho_invoices_to_builds():
+    """Fetches today's Zoho Books invoices and registers un-synced invoices as builds."""
+    zoho = ZohoBooksEngine()
+    invoices = zoho.fetch_invoices()
+    
+    if not invoices:
+        return 0, "No new invoices found in Zoho Books for today."
+
+    bundle = st.session_state.get('data', fetch_master_bundle())
+    df_builds = bundle.get("builds", pd.DataFrame())
+    
+    existing_refs = set()
+    if not df_builds.empty and 'invoice_url' in df_builds.columns:
+        existing_refs = set(df_builds['invoice_url'].dropna().astype(str).str.strip().tolist())
+
+    synced_count = 0
+
+    for inv in invoices:
+        inv_id = inv.get("invoice_id", "")
+        inv_number = inv.get("invoice_number", "")
+        inv_url = f"https://books.zoho.{zoho.domain}/app/{zoho.org_id}#/invoices/{inv_id}"
+        
+        # Avoid duplicate imports
+        if inv_url in existing_refs or inv_number in existing_refs:
+            continue
+
+        cust_name = inv.get("customer_name", "Unknown Customer")
+        cust_phone = inv.get("phone", "")
+        cust_email = inv.get("email", "")
+        phone_10 = format_10digit_phone(cust_phone)
+        wp_pass = phone_10 if phone_10 else ("WS-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)))
+
+        payload = {
+            "customer": cust_name,
+            "phone": cust_phone,
+            "email": cust_email,
+            "date": inv.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "status": "Order Received",
+            "wp_page_password": wp_pass,
+            "invoice_url": inv_url,
+            "notes": f"Imported from Zoho Invoice #{inv_number}"
+        }
+
+        try:
+            new_rec = base.table("builds").create(payload, typecast=True)
+            rec_id = new_rec["id"]
+            
+            wp_link = f"{LIVE_DOMAIN}/?build={rec_id}"
+            payload["id"] = rec_id
+            payload["wp_page_url"] = wp_link
+            
+            safe_airtable_update("builds", rec_id, {"wp_page_url": wp_link})
+            add_local_record("builds", payload)
+            synced_count += 1
+        except Exception as e:
+            st.error(f"Failed to sync invoice #{inv_number}: {e}")
+
+    return synced_count, f"Registered {synced_count} new build(s) from Zoho Books!"
+
 def compute_workshop_analytics(bundle, completed_only=False):
-    """Computes Workshop Trends analytics in-memory with strict deduplication."""
     df_builds = bundle.get("builds", pd.DataFrame())
     df_rims = bundle.get("rims", pd.DataFrame())
     
     if df_builds.empty:
         return {}
 
-    # 1. Deduplicate by unique build record ID to prevent double-counting
     if 'id' in df_builds.columns:
         df_builds = df_builds.drop_duplicates(subset=['id'], keep='last')
 
-    # 2. Filter by status scope if requested
     if completed_only and 'status' in df_builds.columns:
         df_builds = df_builds[df_builds['status'] == "Complete"]
 
@@ -304,7 +422,6 @@ def compute_workshop_analytics(bundle, completed_only=False):
         if not nip_model or nip_model.lower() == "none":
             nip_model = "Unspecified Nipple"
 
-        # Front Wheel
         if f_rim and f_rim.lower() != "none":
             total_wheels += 1
             all_rims.append(f_rim)
@@ -320,7 +437,6 @@ def compute_workshop_analytics(bundle, completed_only=False):
             spoke_records.append({"model": spk_model, "count": f_holes, "month": month_str})
             nipple_records.append({"model": nip_model, "count": f_holes, "month": month_str})
 
-        # Rear Wheel
         if r_rim and r_rim.lower() != "none":
             total_wheels += 1
             all_rims.append(r_rim)
@@ -358,7 +474,6 @@ def compute_workshop_analytics(bundle, completed_only=False):
 # =========================================================================
 
 def render_client_portal():
-    """Client View Module: Zero API Calls when reading from cached bundle."""
     st.markdown("""
         <style>
         .block-container {
@@ -395,20 +510,17 @@ def render_client_portal():
         st.error("❌ No build specified.")
         return
 
-    bundle = st.session_state.get('data', fetch_master_bundle())
-    df_builds = bundle.get("builds", pd.DataFrame())
-
+    # Direct fetch from Airtable to bypass 24h client portal cache delay
     row = {}
-    if not df_builds.empty and target_build_id in df_builds['id'].values:
-        row = df_builds[df_builds['id'] == target_build_id].iloc[0].to_dict()
-    else:
-        try:
-            record = base.table("builds").get(target_build_id)
-            row = record.get("fields", {})
-            row["id"] = record.get("id")
-        except Exception:
-            st.error("❌ Invalid or expired build link reference.")
-            return
+    try:
+        record = base.table("builds").get(target_build_id)
+        row = record.get("fields", {})
+        row["id"] = record.get("id")
+    except Exception:
+        st.error("❌ Invalid or expired build link reference.")
+        return
+
+    bundle = st.session_state.get('data', fetch_master_bundle())
 
     col_logo, col_title = st.columns([1, 4], vertical_alignment="center")
     with col_logo:
@@ -477,7 +589,6 @@ def render_client_portal():
 
     st.divider()
 
-    # DYNAMIC WEIGHT COMPUTATION ENGINE
     f_res, r_res = calculate_wheel_weights(row, bundle)
 
     f_weight_snap = safe_int(row.get("f_weight", 0))
@@ -533,19 +644,24 @@ def render_client_portal():
 
     with c_btn1:
         if inv_url and inv_url.lower() not in ['none', 'nan', '']:
+            if not inv_url.startswith(("http://", "https://")):
+                inv_url = f"https://{inv_url}"
             st.link_button("📄 Open Digital Invoice", inv_url, use_container_width=True)
     with c_btn2:
         if track_url and track_url.lower() not in ['none', 'nan', '']:
+            if not track_url.startswith(("http://", "https://")):
+                track_url = f"https://{track_url}"
             st.link_button("🚚 Track Courier Shipment", track_url, use_container_width=True)
     with c_btn3:
         if gallery_url and gallery_url.lower() not in ['none', 'nan', '']:
+            if not gallery_url.startswith(("http://", "https://")):
+                gallery_url = f"https://{gallery_url}"
             st.link_button("📸 View Build Gallery", gallery_url, use_container_width=True)
     with c_btn4:
         st.link_button("⭐️ Leave a Google Review", GOOGLE_REVIEW_URL, use_container_width=True)
 
 
 def render_admin_pipeline():
-    """Administrative View Module: Low API Quota Builders Console."""
     if "admin_authenticated" not in st.session_state: 
         st.session_state.admin_authenticated = False
 
@@ -584,7 +700,6 @@ def render_admin_pipeline():
     
     tabs = st.tabs(["🏁 Workshop", "🚚 Stock Orders", "📊 Trends", "📜 Proven Recipes", "➕ Register Build", "📦 Library"])
 
-    # Extract dynamic component selection lists from master inventory bundle
     rim_opts = ["None"] + sorted([str(x) for x in st.session_state.data["rims"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["rims"].columns else ["None"]
     hub_opts = ["None"] + sorted([str(x) for x in st.session_state.data["hubs"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["hubs"].columns else ["None"]
     spoke_opts = ["None"] + sorted([str(x) for x in st.session_state.data["spokes"]['label'].dropna().tolist() if str(x).strip()], key=str.lower) if 'label' in st.session_state.data["spokes"].columns else ["None"]
@@ -788,9 +903,6 @@ def render_admin_pipeline():
                                 use_container_width=True
                             )
                     with c_btn4:
-                        # =========================================================
-                        # DYNAMIC COMPONENT MODIFICATION POPOVER
-                        # =========================================================
                         with st.popover("🔧 Edit Components"):
                             st.markdown("#### Modify Build Components")
                             
@@ -801,7 +913,6 @@ def render_admin_pipeline():
                             spk_cur   = str(row.get('spoke', 'None'))
                             nip_cur   = str(row.get('nipple', 'None'))
 
-                            # Calculate sensible spoke count defaults from rim database if row is unassigned
                             frd_def = safe_int(get_comp_data_from_bundle(st.session_state.data, "rims", f_rim_cur).get('holes', 28))
                             rrd_def = safe_int(get_comp_data_from_bundle(st.session_state.data, "rims", r_rim_cur).get('holes', 28))
 
@@ -1258,6 +1369,23 @@ def render_admin_pipeline():
     # -------------------------------------------------------------------------
     with tabs[4]:
         st.header("📝 Register New Build")
+        
+        # ZOHO FAST-TRACK SYNC ACTION BAR
+        c_sync1, c_sync2 = st.columns([3, 1])
+        with c_sync1:
+            st.markdown("### ⚡ Fast-Track Registration")
+            st.caption("Import customer and order details directly from today's Zoho Books invoices.")
+        with c_sync2:
+            if st.button("🔄 Sync New Zoho Invoices", use_container_width=True):
+                with st.spinner("Fetching today's invoices from Zoho Books..."):
+                    count, msg = sync_zoho_invoices_to_builds()
+                    if count > 0:
+                        st.toast(f"✅ {msg}")
+                        st.rerun()
+                    else:
+                        st.info(msg)
+
+        st.divider()
         st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
 
