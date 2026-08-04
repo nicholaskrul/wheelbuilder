@@ -337,7 +337,6 @@ def sync_zoho_invoices_to_builds():
         inv_number = inv.get("invoice_number", "")
         inv_url = f"https://books.zoho.{zoho.domain}/app/{zoho.org_id}#/invoices/{inv_id}"
         
-        # Avoid duplicate imports
         if inv_url in existing_refs or inv_number in existing_refs:
             continue
 
@@ -510,7 +509,6 @@ def render_client_portal():
         st.error("❌ No build specified.")
         return
 
-    # Direct fetch from Airtable to bypass 24h client portal cache delay
     row = {}
     try:
         record = base.table("builds").get(target_build_id)
@@ -1370,23 +1368,16 @@ def render_admin_pipeline():
     with tabs[4]:
         st.header("📝 Register New Build")
         
-        # ZOHO FAST-TRACK SYNC ACTION BAR
-        c_sync1, c_sync2 = st.columns([3, 1])
-        with c_sync1:
-            st.markdown("### ⚡ Fast-Track Registration")
-            st.caption("Import customer and order details directly from today's Zoho Books invoices.")
-        with c_sync2:
-            if st.button("🔄 Sync New Zoho Invoices", use_container_width=True):
-                with st.spinner("Fetching today's invoices from Zoho Books..."):
-                    count, msg = sync_zoho_invoices_to_builds()
-                    if count > 0:
-                        st.toast(f"✅ {msg}")
-                        st.rerun()
-                    else:
-                        st.info(msg)
+        # ZOHO FAST-TRACK SYNC BUTTON (Replaces DT Swiss Spoke Calculator)
+        if st.button("⚡ Sync Today's Zoho Invoices", use_container_width=True):
+            with st.spinner("Fetching today's invoices from Zoho Books..."):
+                count, msg = sync_zoho_invoices_to_builds()
+                if count > 0:
+                    st.toast(f"✅ {msg}")
+                    st.rerun()
+                else:
+                    st.info(msg)
 
-        st.divider()
-        st.link_button("⚙️ Open DT Swiss Spoke Calculator", "https://spokes-calculator.dtswiss.com/en/calculator", use_container_width=True)
         st.divider()
 
         with st.form("reg_form_v29"):
