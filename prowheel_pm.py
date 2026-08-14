@@ -398,6 +398,7 @@ def compute_workshop_analytics(bundle, completed_only=False):
 
     all_rims = []
     all_hubs = []
+    rim_records = []
     spoke_records = []
     nipple_records = []
     total_wheels = 0
@@ -424,6 +425,8 @@ def compute_workshop_analytics(bundle, completed_only=False):
         if f_rim and f_rim.lower() != "none":
             total_wheels += 1
             all_rims.append(f_rim)
+            rim_records.append({"model": f_rim, "count": 1, "month": month_str})
+            
             if f_hub and f_hub.lower() != "none":
                 all_hubs.append(f_hub)
             
@@ -439,6 +442,8 @@ def compute_workshop_analytics(bundle, completed_only=False):
         if r_rim and r_rim.lower() != "none":
             total_wheels += 1
             all_rims.append(r_rim)
+            rim_records.append({"model": r_rim, "count": 1, "month": month_str})
+            
             if r_hub and r_hub.lower() != "none":
                 all_hubs.append(r_hub)
             
@@ -451,6 +456,7 @@ def compute_workshop_analytics(bundle, completed_only=False):
             spoke_records.append({"model": spk_model, "count": r_holes, "month": month_str})
             nipple_records.append({"model": nip_model, "count": r_holes, "month": month_str})
 
+    df_rim = pd.DataFrame(rim_records)
     df_spk = pd.DataFrame(spoke_records)
     df_nip = pd.DataFrame(nipple_records)
 
@@ -464,6 +470,7 @@ def compute_workshop_analytics(bundle, completed_only=False):
         "total_wheels": total_wheels,
         "top_rims": top_rims,
         "top_hubs": top_hubs,
+        "df_rim": df_rim,
         "df_spk": df_spk,
         "df_nip": df_nip
     }
@@ -1189,6 +1196,7 @@ def render_admin_pipeline():
         if not analytics or analytics.get("total_builds", 0) == 0:
             st.info("No build records found for the selected scope.")
         else:
+            df_rim = analytics["df_rim"]
             df_spk = analytics["df_spk"]
             df_nip = analytics["df_nip"]
             top_rims = analytics["top_rims"]
@@ -1196,6 +1204,7 @@ def render_admin_pipeline():
             df_processed_builds = analytics["df_builds_processed"]
             rim_holes_map = analytics["rim_holes_map"]
 
+            tot_rims = df_rim['count'].sum() if not df_rim.empty else 0
             tot_spokes = df_spk['count'].sum() if not df_spk.empty else 0
             tot_nipples = df_nip['count'].sum() if not df_nip.empty else 0
 
@@ -1209,6 +1218,7 @@ def render_admin_pipeline():
 
             st.divider()
 
+            # 1. Top Rims & Top Hubs
             c_rim_col, c_hub_col = st.columns(2)
             with c_rim_col:
                 st.markdown("### 🔘 Top 10 Rims to Date")
@@ -1232,6 +1242,40 @@ def render_admin_pipeline():
 
             st.divider()
 
+            # 2. Monthly Rim Consumption Analytics
+            st.markdown("### 🔘 Rim Volume Analytics")
+            rim_col1, rim_col2 = st.columns(2)
+            
+            with rim_col1:
+                st.markdown("**Rims Used to Date (by Model)**")
+                if not df_rim.empty:
+                    rim_summary = df_rim.groupby("model")["count"].sum().sort_values(ascending=False)
+                    st.bar_chart(rim_summary, color="#00FFCC")
+                    rim_sum_df = rim_summary.reset_index()
+                    rim_sum_df.columns = ["Rim Model", "Total Units Used"]
+                    st.dataframe(rim_sum_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No rim data available.")
+
+            with rim_col2:
+                st.markdown("**Monthly Rim Consumption (by Month)**")
+                if not df_rim.empty:
+                    rim_monthly = df_rim.groupby("month")["count"].sum().sort_index()
+                    st.bar_chart(rim_monthly, color="#00FF99")
+                    rim_m_df = rim_monthly.reset_index()
+                    rim_m_df.columns = ["Month (YYYY-MM)", "Rims Installed"]
+                    st.dataframe(rim_m_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No monthly rim data available.")
+
+            if not df_rim.empty:
+                with st.expander("🔍 Detailed Monthly Rim Breakdown by Model"):
+                    rim_pivot = df_rim.pivot_table(index="month", columns="model", values="count", aggfunc="sum", fill_value=0)
+                    st.dataframe(rim_pivot, use_container_width=True)
+
+            st.divider()
+
+            # 3. Monthly Spoke Consumption Analytics
             st.markdown("### 📏 Spoke Volume Analytics")
             spk_col1, spk_col2 = st.columns(2)
             
@@ -1264,6 +1308,7 @@ def render_admin_pipeline():
 
             st.divider()
 
+            # 4. Monthly Nipple Consumption Analytics
             st.markdown("### 🔩 Nipple Volume Analytics")
             nip_col1, nip_col2 = st.columns(2)
             
@@ -1296,6 +1341,7 @@ def render_admin_pipeline():
 
             st.divider()
 
+            # 5. Audit & Verification Section
             with st.expander("🔎 Audit & Verification: Inspect Individual Build Calculations", expanded=True):
                 st.markdown("Select a month to inspect the exact builds and spoke/nipple counts calculated by the system:")
                 
@@ -1368,7 +1414,7 @@ def render_admin_pipeline():
     with tabs[4]:
         st.header("📝 Register New Build")
         
-        # ZOHO FAST-TRACK SYNC BUTTON (Replaces DT Swiss Spoke Calculator)
+        # ZOHO FAST-TRACK SYNC BUTTON
         if st.button("⚡ Sync Today's Zoho Invoices", use_container_width=True):
             with st.spinner("Fetching today's invoices from Zoho Books..."):
                 count, msg = sync_zoho_invoices_to_builds()
