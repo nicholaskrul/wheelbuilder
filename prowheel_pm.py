@@ -373,6 +373,103 @@ def sync_zoho_invoices_to_builds():
 
     return synced_count, f"Registered {synced_count} new build(s) from Zoho Books!"
 
+def get_active_parts_manifest(active_builds, bundle):
+    """Generates a structured customer-by-customer parts list and aggregated workshop inventory picking table."""
+    def clean_len(val):
+        try:
+            return f"{float(val):.1f}" if val and float(val) > 0 else "0.0"
+        except Exception:
+            return "0.0"
+
+    rim_holes_map = {}
+    df_rims = bundle.get("rims", pd.DataFrame())
+    if not df_rims.empty and 'label' in df_rims.columns and 'holes' in df_rims.columns:
+        for _, r_row in df_rims.iterrows():
+            lbl = str(r_row.get('label', '')).strip().lower()
+            if lbl:
+                rim_holes_map[lbl] = safe_int(r_row.get('holes', 28))
+
+    parts_rows = []
+    text_lines = [
+        "🚲 WHEELBUILDER LAB - ACTIVE BUILDS PARTS PICKING MANIFEST",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "========================================================================\n"
+    ]
+
+    for _, row in active_builds.iterrows():
+        cust = str(row.get('customer', 'Unknown')).strip()
+        status = str(row.get('status', 'Order Received')).strip()
+        spk_mod = str(row.get('spoke', 'Unspecified Spoke')).strip()
+        nip_mod = str(row.get('nipple', 'Unspecified Nipple')).strip()
+
+        if not spk_mod or spk_mod.lower() in ["none", "nan"]:
+            spk_mod = "Unspecified Spoke"
+        if not nip_mod or nip_mod.lower() in ["none", "nan"]:
+            nip_mod = "Unspecified Nipple"
+
+        text_lines.append(f"CUSTOMER: {cust} | Status: {status}")
+
+        # Front Wheel
+        f_rim = str(row.get('f_rim', '')).strip()
+        if f_rim and f_rim.lower() != "none":
+            f_hub = str(row.get('f_hub', 'Unspecified Hub')).strip()
+            f_cnt = safe_int(row.get('f_holes'))
+            if f_cnt <= 0:
+                f_cnt = rim_holes_map.get(f_rim.lower(), 28)
+            if f_cnt <= 0 or f_cnt > 48:
+                f_cnt = 28
+
+            fl_l = clean_len(row.get('f_l'))
+            fr_l = clean_len(row.get('f_r'))
+
+            parts_rows.append({
+                "Customer": cust,
+                "Status": status,
+                "Wheel": "Front",
+                "Rim": f_rim,
+                "Hub": f_hub,
+                "Spoke Model": spk_mod,
+                "Spoke Lengths (L / R)": f"L: {fl_l}mm / R: {fr_l}mm",
+                "Spoke Qty": f_cnt,
+                "Nipple Model": nip_mod,
+                "Nipple Qty": f_cnt
+            })
+            text_lines.append(f"  🔘 FRONT : Rim: {f_rim} | Hub: {f_hub} | Spokes: {spk_mod} (L:{fl_l}mm / R:{fr_l}mm x {f_cnt}) | Nipples: {nip_mod} x {f_cnt}")
+
+        # Rear Wheel
+        r_rim = str(row.get('r_rim', '')).strip()
+        if r_rim and r_rim.lower() != "none":
+            r_hub = str(row.get('r_hub', 'Unspecified Hub')).strip()
+            r_cnt = safe_int(row.get('r_holes'))
+            if r_cnt <= 0:
+                r_cnt = rim_holes_map.get(r_rim.lower(), 28)
+            if r_cnt <= 0 or r_cnt > 48:
+                r_cnt = 28
+
+            rl_l = clean_len(row.get('r_l'))
+            rr_l = clean_len(row.get('r_r'))
+
+            parts_rows.append({
+                "Customer": cust,
+                "Status": status,
+                "Wheel": "Rear",
+                "Rim": r_rim,
+                "Hub": r_hub,
+                "Spoke Model": spk_mod,
+                "Spoke Lengths (L / R)": f"L: {rl_l}mm / R: {rr_l}mm",
+                "Spoke Qty": r_cnt,
+                "Nipple Model": nip_mod,
+                "Nipple Qty": r_cnt
+            })
+            text_lines.append(f"  🔘 REAR  : Rim: {r_rim} | Hub: {r_hub} | Spokes: {spk_mod} (L:{rl_l}mm / R:{rr_l}mm x {r_cnt}) | Nipples: {nip_mod} x {r_cnt}")
+
+        text_lines.append("-" * 72)
+
+    df_manifest = pd.DataFrame(parts_rows)
+    text_summary = "\n".join(text_lines)
+
+    return df_manifest, text_summary
+
 def compute_workshop_analytics(bundle, completed_only=False):
     df_builds = bundle.get("builds", pd.DataFrame())
     df_rims = bundle.get("rims", pd.DataFrame())
@@ -714,9 +811,51 @@ def render_admin_pipeline():
     # TAB 0: WORKSHOP PIPELINE
     # -------------------------------------------------------------------------
     with tabs[0]:
-        c_head, c_sync, c_logout = st.columns([4, 1, 1])
+        c_head, c_parts_btn, c_sync, c_logout = st.columns([3, 1.8, 1, 1])
         with c_head:
             st.subheader("🏁 Workshop Pipeline")
+        
+        df_builds = st.session_state.data["builds"]
+        active_builds = pd.DataFrame()
+        if not df_builds.empty:
+            active_mask = df_builds['status'].fillna("Order Received") != "Complete"
+            active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
+            completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
+
+        with c_parts_btn:
+            # ACTIVE BUILDS PARTS LIST POPOVER BUTTON
+            with st.popover("📋 Active Build Parts List", use_container_width=True):
+                st.markdown("### 📋 Required Parts for Active Builds")
+                if not active_builds.empty:
+                    df_manifest, text_manifest = get_active_parts_manifest(active_builds, st.session_state.data)
+                    
+                    st.caption(f"Showing required inventory components across **{len(active_builds)} active build sheet(s)**.")
+                    st.dataframe(df_manifest, use_container_width=True, hide_index=True)
+                    
+                    st.divider()
+                    st.markdown("**📦 Aggregated Inventory Picking Summary**")
+                    c_agg1, c_agg2 = st.columns(2)
+                    with c_agg1:
+                        if "Rim" in df_manifest.columns:
+                            rim_counts = df_manifest["Rim"].value_counts().reset_index()
+                            rim_counts.columns = ["Rim Model", "Required Units"]
+                            st.dataframe(rim_counts, use_container_width=True, hide_index=True)
+                    with c_agg2:
+                        if "Hub" in df_manifest.columns:
+                            hub_counts = df_manifest["Hub"].value_counts().reset_index()
+                            hub_counts.columns = ["Hub Model", "Required Units"]
+                            st.dataframe(hub_counts, use_container_width=True, hide_index=True)
+
+                    st.download_button(
+                        label="📥 Download Picking Manifest (.txt)",
+                        data=text_manifest,
+                        file_name=f"active_builds_parts_manifest_{datetime.now().strftime('%Y%m%d')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                else:
+                    st.info("No active builds currently requiring parts.")
+
         with c_sync:
             if st.button("🔄 Force Sync", use_container_width=True, help="Only click if you made manual edits in Airtable web UI"):
                 refresh_api()
@@ -727,14 +866,9 @@ def render_admin_pipeline():
                 st.session_state.admin_authenticated = False
                 st.rerun()
 
-        df_builds = st.session_state.data["builds"]
         if df_builds.empty: 
             st.info("No active builds found.")
         else:
-            active_mask = df_builds['status'].fillna("Order Received") != "Complete"
-            active_builds = df_builds[active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
-            completed_builds = df_builds[~active_mask].sort_values(by='customer', key=lambda col: col.str.lower())
-
             st.write(f"### 🛠️ Active Builds ({len(active_builds)})")
             for _, row in active_builds.iterrows():
                 f_res, r_res = calculate_wheel_weights(row, st.session_state.data)
